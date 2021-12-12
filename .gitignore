@@ -34,6 +34,7 @@
 # User files
 *.user
 *.filters
+.vs/
 
 # Build results
 [Dd]ebug/
