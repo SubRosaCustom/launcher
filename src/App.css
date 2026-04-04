@@ -1,0 +1,294 @@
+@font-face {
+  font-family: 'Rockwell Std';
+  src: url('./assets/rockwell-std.otf') format('opentype');
+  font-style: normal;
+  font-weight: 400;
+}
+
+:root {
+  --bg: #050505;
+  --text: #fff;
+  --muted: rgba(255, 255, 255, 0.72);
+  --border: #a0a0a0;
+  --border-muted: #404040;
+  --hover: #dfdfdf;
+  --hover-active: #fff;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  font-family: 'Rockwell Std', Rockwell, 'Times New Roman', serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  overflow: hidden;
+}
+
+.viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.noise-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+.launcher-shell {
+  z-index: 10;
+  width: min(560px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.logo {
+  max-width: min(270px, 70vw);
+  height: auto;
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
+}
+
+button,
+input,
+label {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  border: 0;
+  background: transparent;
+}
+
+.action-btn {
+  width: 200px;
+  height: 48px;
+  border: 4px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.btn-label {
+  font-size: 0.9rem;
+  font-weight: 100;
+  display: inline-block;
+}
+
+.action-btn:hover:not(:disabled) {
+  background-color: var(--hover);
+  border-color: var(--hover);
+}
+
+.action-btn:disabled,
+.action-btn.is-processing {
+  cursor: default;
+  border-color: var(--border-muted);
+  color: var(--muted);
+}
+
+.log-stack-container {
+  position: absolute;
+  bottom: 24px;
+  width: min(320px, calc(100vw - 32px));
+  height: 60px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 1px;
+  pointer-events: none;
+  z-index: 15;
+}
+
+.log-entry {
+  width: 100%;
+  text-align: center;
+  font-size: 0.7rem;
+  transition: opacity transform 0.2s cubic-bezier(0.23, 1, 0.320, 1);
+}
+
+.log-content {
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  display: inline-block;
+  transition: opacity transform 0.2s cubic-bezier(0.23, 1, 0.320, 1);
+}
+
+.log-depth-3 {
+  opacity: 0.28;
+  font-size: 0.62rem;
+  transition: opacity transform 0.2s cubic-bezier(0.23, 1, 0.320, 1);
+}
+
+.log-depth-2 {
+  opacity: 0.45;
+  font-size: 0.65rem;
+  transition: opacity transform 0.2s cubic-bezier(0.23, 1, 0.320, 1);
+}
+
+.log-depth-1 {
+  opacity: 0.7;
+  font-size: 0.68rem;
+  transition: opacity transform 0.2s cubic-bezier(0.23, 1, 0.320, 1);
+}
+
+.log-depth-0 {
+  opacity: 1;
+  transition: opacity transform 0.2s cubic-bezier(0.23, 1, 0.320, 1);
+}
+
+.log-latest .log-content {
+  color: var(--text);
+  transition: opacity transform 0.2s cubic-bezier(0.23, 1, 0.320, 1);
+}
+
+.hint,
+.settings-row label {
+  display: inline-block;
+  padding: 0px 2px;
+}
+
+.settings-page {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  background: var(--bg);
+}
+
+.settings-top {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+}
+
+.settings-body {
+  width: min(980px, calc(100vw - 48px));
+  margin: 50px auto 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.settings-actions {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+}
+
+.settings-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+}
+
+.settings-row input {
+  width: min(700px, calc(100vw - 240px));
+  padding: 10px 12px;
+  border: 0px;
+  background: rgb(48, 48, 48);
+  outline: none;
+}
+
+.settings-row input:hover {
+  background: rgb(80, 80, 80);
+}
+
+.settings-row label {
+  white-space: nowrap;
+}
+
+.toggle-btn {
+  min-width: min(700px, calc(100vw - 200px));
+  min-height: 40px;
+  padding: 0px 3px;
+  border: 4px solid var(--hover);
+  background-color: var(--bg);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.toggle-box {
+  width: 25px;
+  height: 25px;
+  border: 2px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.toggle-fill {
+  width: 100%;
+  height: 100%;
+  background: var(--hover);
+  opacity: 0;
+}
+
+.toggle-btn:hover .toggle-fill {
+  opacity: 0.5;
+  background-color: var(--hover);
+}
+
+.toggle-btn.is-on .toggle-fill {
+  opacity: 1;
+}
+
+.toggle-btn.is-on:hover .toggle-fill {
+  opacity: 1;
+  background-color: var(--hover-active);
+}
+
+.hint {
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+
+.support-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.support-btn {
+  width: auto;
+  min-width: 170px;
+  padding: 0 16px;
+}
