@@ -11,7 +11,9 @@ import {
   detectSubrosa,
   downloadInjectionLibrary,
   forceRedownload,
+  getLauncherUpdateState,
   getReleaseVersion,
+  installLauncherUpdate,
   launchGame,
   loadSettings,
   openCacheFolder,
@@ -20,6 +22,7 @@ import {
 } from './api/launcher';
 import type {
   DetectionResult,
+  LauncherUpdateState,
   LibraryDownloadRequest,
   LauncherSettings,
   Phase,
@@ -50,9 +53,17 @@ function App() {
   });
   const [detection, setDetection] = useState<DetectionResult | null>(null);
   const [releaseVersion, setReleaseVersion] = useState('Unknown');
+  const [launcherUpdate, setLauncherUpdate] = useState<LauncherUpdateState>({
+    enabled: false,
+    currentVersion: 'unknown',
+    available: false,
+    version: null,
+    notes: null,
+  });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [activeSupportAction, setActiveSupportAction] = useState<string | null>(null);
+  const [isInstallingLauncherUpdate, setIsInstallingLauncherUpdate] = useState(false);
 
   const appendLog = (message: string) => {
     setLogs((currentLogs) => [...currentLogs, message]);
@@ -64,21 +75,39 @@ function App() {
 
     const initialize = async () => {
       try {
-        const [loadedSettings, detectedGame, release] = await Promise.all([
+        const [loadedSettings, detectedGame, release, launcherState] = await Promise.all([
           loadSettings(),
           detectSubrosa(),
           getReleaseVersion(configuredLibraryRequest.repo),
+          getLauncherUpdateState().catch((error) => {
+            appendLog(`Launcher update check failed: ${String(error)}`);
+            return {
+              enabled: false,
+              currentVersion: 'unknown',
+              available: false,
+              version: null,
+              notes: null,
+            } satisfies LauncherUpdateState;
+          }),
         ]);
         if (cancelled) return;
 
         setSettings(loadedSettings);
         setDetection(detectedGame);
         setReleaseVersion(release.value);
+        setLauncherUpdate(launcherState);
         appendLog(
           detectedGame.gameDir
             ? `Sub Rosa found: ${detectedGame.gameDir}`
             : 'Sub Rosa not detected. Check Steam install and game files.',
         );
+        if (launcherState.enabled) {
+          appendLog(
+            launcherState.available
+              ? `Launcher update available: ${launcherState.version}`
+              : `Launcher up to date: ${launcherState.currentVersion}`,
+          );
+        }
       } catch (e) {
         if (cancelled) return;
         appendLog(`Startup failed: ${String(e)}`);
@@ -135,6 +164,19 @@ function App() {
     } catch (e) {
       appendLog(`Launch failed: ${String(e)}`);
       setPhase('idle');
+    }
+  };
+
+  const handleLauncherUpdate = async () => {
+    if (!launcherUpdate.available || isInstallingLauncherUpdate) return;
+
+    setIsInstallingLauncherUpdate(true);
+    try {
+      appendLog(`Installing launcher update: ${launcherUpdate.version}`);
+      await installLauncherUpdate();
+    } catch (e) {
+      appendLog(`Launcher update failed: ${String(e)}`);
+      setIsInstallingLauncherUpdate(false);
     }
   };
 
@@ -208,7 +250,8 @@ function App() {
 
       <div className="launcher-shell">
         <img src={logoImage} alt="Sub Rosa logo" className="logo" />
-        <p className="version-label">version: {releaseVersion}</p>
+        <p className="version-label">launcher: {launcherUpdate.currentVersion}</p>
+        <p className="version-label">client: {releaseVersion}</p>
         <button
           className={`action-btn ${phase !== 'idle' ? 'is-processing' : ''}`}
           onClick={handleLaunch}
@@ -216,6 +259,21 @@ function App() {
         >
           <span className="btn-label">{phaseLabels[phase]}</span>
         </button>
+        {launcherUpdate.enabled ? (
+          <button
+            className={`action-btn ${isInstallingLauncherUpdate ? 'is-processing' : ''}`}
+            onClick={handleLauncherUpdate}
+            disabled={!launcherUpdate.available || isInstallingLauncherUpdate || phase !== 'idle'}
+          >
+            <span className="btn-label">
+              {isInstallingLauncherUpdate
+                ? 'Updating Launcher'
+                : launcherUpdate.available
+                  ? `Update Launcher`
+                  : 'Launcher Up To Date'}
+            </span>
+          </button>
+        ) : null}
         <button className="action-btn" onClick={() => setIsSettingsOpen(true)}>
           <span className="btn-label">Settings</span>
         </button>

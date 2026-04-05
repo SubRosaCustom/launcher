@@ -1,0 +1,73 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Git tag to release, for example v0.1.0 or v0.1.0-beta.1
+        required: true
+      prerelease:
+        description: Mark the GitHub release as a prerelease
+        required: true
+        default: "true"
+      release_name:
+        description: Optional release title override
+        required: false
+        default: ""
+
+jobs:
+  publish-tauri:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      SRC_LAUNCHER_UPDATER_PUBKEY: ${{ secrets.SRC_LAUNCHER_UPDATER_PUBKEY }}
+      VITE_LIBRARY_GITHUB_REPO: owner/repo
+      SRC_MANIFEST_PUBKEY_B64: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@action-v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || 'launcher-v__VERSION__' }}
+          releaseName: ${{ github.event_name == 'workflow_dispatch' && (inputs.release_name || inputs.release_tag) || 'SRC Launcher v__VERSION__' }}
+          releaseBody: "Automated launcher release."
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == 'true' || false }}
+          generateReleaseNotes: true
+          args: ${{ matrix.args }}

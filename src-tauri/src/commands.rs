@@ -10,8 +10,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{async_runtime::Mutex as AsyncMutex, AppHandle};
+use tauri_plugin_updater::UpdaterExt;
 
 use crate::{
+    launcher_updater_pubkey,
     settings::{self, LauncherSettings},
     steam, support,
 };
@@ -67,6 +69,16 @@ pub struct ReleaseVersion {
     pub value: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherUpdateState {
+    pub enabled: bool,
+    pub current_version: String,
+    pub available: bool,
+    pub version: Option<String>,
+    pub notes: Option<String>,
+}
+
 #[tauri::command]
 pub fn load_settings(app: AppHandle) -> Result<LauncherSettings, String> {
     settings::load_settings(&app)
@@ -117,6 +129,69 @@ pub fn collect_diagnostics(app: AppHandle, args: DiagnosticsArgs) -> Result<Stri
 #[tauri::command]
 pub fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     support::copy_text_to_clipboard(&text)
+}
+
+#[tauri::command]
+pub async fn get_launcher_update_state(app: AppHandle) -> Result<LauncherUpdateState, String> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+
+    if launcher_updater_pubkey().is_none() {
+        return Ok(LauncherUpdateState {
+            enabled: false,
+            current_version,
+            available: false,
+            version: None,
+            notes: None,
+        });
+    }
+
+    let updater = app
+        .updater()
+        .map_err(|e| format!("launcher_updater_init_failed: {e}"))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("launcher_update_check_failed: {e}"))?;
+
+    Ok(match update {
+        Some(update) => LauncherUpdateState {
+            enabled: true,
+            current_version,
+            available: true,
+            version: Some(update.version.to_string()),
+            notes: update.body,
+        },
+        None => LauncherUpdateState {
+            enabled: true,
+            current_version,
+            available: false,
+            version: None,
+            notes: None,
+        },
+    })
+}
+
+#[tauri::command]
+pub async fn install_launcher_update(app: AppHandle) -> Result<(), String> {
+    if launcher_updater_pubkey().is_none() {
+        return Err("launcher_updater_not_configured".into());
+    }
+
+    let updater = app
+        .updater()
+        .map_err(|e| format!("launcher_updater_init_failed: {e}"))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|e| format!("launcher_update_check_failed: {e}"))?
+        .ok_or_else(|| "launcher_update_not_available".to_string())?;
+
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|e| format!("launcher_update_install_failed: {e}"))?;
+
+    app.restart();
 }
 
 #[tauri::command]

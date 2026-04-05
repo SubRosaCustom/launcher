@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   DetectionResult,
+  LauncherUpdateState,
   LibraryDownloadRequest,
   LauncherSettings,
   ReleaseVersion,
@@ -44,6 +45,14 @@ export function collectDiagnostics(repo?: string) {
 
 export function copyTextToClipboard(text: string) {
   return invoke<void>('copy_text_to_clipboard', { text });
+}
+
+export function getLauncherUpdateState() {
+  return invoke<LauncherUpdateState>('get_launcher_update_state');
+}
+
+export function installLauncherUpdate() {
+  return invoke<void>('install_launcher_update');
 }
 
 export function getReleaseVersion(repo: string) {

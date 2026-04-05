@@ -2,6 +2,14 @@
 
 Downloads the latest release for your platfrom from SubRosaCustom/client_releases GitHub repo and loads it into the game
 
+The launcher binary can also self-update from `SubRosaCustom/launcher` GitHub releases when the updater public key is baked in at build time through `SRC_LAUNCHER_UPDATER_PUBKEY`.
+
+Launcher release requirements:
+- publish releases in `SubRosaCustom/launcher`
+- attach signed Tauri updater artifacts and `latest.json`
+- provide `TAURI_SIGNING_PRIVATE_KEY` during release builds
+- provide `SRC_LAUNCHER_UPDATER_PUBKEY` during launcher builds
+
 ## Development
 
 - Install deps: `npm ci`

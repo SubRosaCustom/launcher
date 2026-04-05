@@ -3,8 +3,27 @@ mod settings;
 mod steam;
 mod support;
 
+pub(crate) fn launcher_updater_pubkey() -> Option<&'static str> {
+    match option_env!("SRC_LAUNCHER_UPDATER_PUBKEY") {
+        Some(value) if !value.trim().is_empty() => Some(value),
+        _ => None,
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            if let Some(pubkey) = launcher_updater_pubkey() {
+                #[cfg(desktop)]
+                app.handle().plugin(
+                    tauri_plugin_updater::Builder::new()
+                        .pubkey(pubkey)
+                        .build(),
+                )?;
+            }
+
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::load_settings,
             commands::save_settings,
@@ -16,6 +35,8 @@ pub fn run() {
             commands::clear_cache,
             commands::collect_diagnostics,
             commands::copy_text_to_clipboard,
+            commands::get_launcher_update_state,
+            commands::install_launcher_update,
             commands::get_release_version,
             commands::download_injection_library,
             commands::launch_game
