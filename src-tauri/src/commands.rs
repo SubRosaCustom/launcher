@@ -5,11 +5,14 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::Command,
-    sync::OnceLock,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, OnceLock,
+    },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tauri::{async_runtime::Mutex as AsyncMutex, AppHandle};
+use tauri::{async_runtime::Mutex as AsyncMutex, AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 
 use crate::{
@@ -24,6 +27,8 @@ const MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 const RETRY_DELAYS_MS: [u64; 2] = [250, 750];
 const CONNECT_TIMEOUT_SECS: u64 = 8;
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+const CLIENT_DOWNLOAD_PROGRESS_EVENT: &str = "client-download-progress";
+const LAUNCHER_UPDATE_PROGRESS_EVENT: &str = "launcher-update-progress";
 
 static DOWNLOAD_LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
 
@@ -77,6 +82,14 @@ pub struct LauncherUpdateState {
     pub available: bool,
     pub version: Option<String>,
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferProgressPayload {
+    pub downloaded: u64,
+    pub total: Option<u64>,
+    pub done: bool,
 }
 
 #[tauri::command]
@@ -186,8 +199,34 @@ pub async fn install_launcher_update(app: AppHandle) -> Result<(), String> {
         .map_err(|e| format!("launcher_update_check_failed: {e}"))?
         .ok_or_else(|| "launcher_update_not_available".to_string())?;
 
+    let downloaded = Arc::new(AtomicU64::new(0));
+    let on_chunk_downloaded = Arc::clone(&downloaded);
+    let on_finish_downloaded = Arc::clone(&downloaded);
     update
-        .download_and_install(|_, _| {}, || {})
+        .download_and_install(
+            |chunk_length, content_length| {
+                let current =
+                    on_chunk_downloaded.fetch_add(chunk_length as u64, Ordering::Relaxed)
+                        + chunk_length as u64;
+                emit_transfer_progress(
+                    &app,
+                    LAUNCHER_UPDATE_PROGRESS_EVENT,
+                    current,
+                    content_length,
+                    false,
+                );
+            },
+            || {
+                let final_size = on_finish_downloaded.load(Ordering::Relaxed);
+                emit_transfer_progress(
+                    &app,
+                    LAUNCHER_UPDATE_PROGRESS_EVENT,
+                    final_size,
+                    Some(final_size),
+                    true,
+                );
+            },
+        )
         .await
         .map_err(|e| format!("launcher_update_install_failed: {e}"))?;
 
@@ -250,6 +289,15 @@ pub async fn download_injection_library(
         &artifact_url,
         &cached_artifact_path,
         LIBRARY_MAX_BYTES,
+        |downloaded, total, done| {
+            emit_transfer_progress(
+                &app,
+                CLIENT_DOWNLOAD_PROGRESS_EVENT,
+                downloaded,
+                total,
+                done,
+            );
+        },
     )
     .await?;
 
@@ -308,11 +356,12 @@ async fn download_file_with_retry(
     url: &str,
     target: &Path,
     max_bytes: u64,
+    mut on_progress: impl FnMut(u64, Option<u64>, bool),
 ) -> Result<(), String> {
     let mut attempt = 0;
     loop {
         attempt += 1;
-        match download_file(client, url, target, max_bytes).await {
+        match download_file(client, url, target, max_bytes, &mut on_progress).await {
             Ok(result) => return Ok(result),
             Err(err) => {
                 if attempt >= MAX_DOWNLOAD_ATTEMPTS || !is_retryable_error(&err) {
@@ -330,6 +379,7 @@ async fn download_file(
     url: &str,
     target: &Path,
     max_bytes: u64,
+    mut on_progress: impl FnMut(u64, Option<u64>, bool),
 ) -> Result<(), String> {
     let tmp = unique_tmp_path(target)?;
 
@@ -341,7 +391,8 @@ async fn download_file(
 
     classify_status(res.status())?;
 
-    if let Some(len) = res.content_length() {
+    let total = res.content_length();
+    if let Some(len) = total {
         if len > max_bytes {
             return Err(format!("download_too_large: {len} > {max_bytes}"));
         }
@@ -350,6 +401,7 @@ async fn download_file(
     let mut file =
         fs::File::create(&tmp).map_err(|e| format!("io_error: cannot create file: {e}"))?;
     let mut size = 0_u64;
+    on_progress(0, total, false);
 
     while let Some(chunk) = res.chunk().await.map_err(classify_request_error)? {
         size += chunk.len() as u64;
@@ -359,14 +411,33 @@ async fn download_file(
         }
         file.write_all(&chunk)
             .map_err(|e| format!("io_error: cannot write file chunk: {e}"))?;
+        on_progress(size, total, false);
     }
 
     file.flush()
         .map_err(|e| format!("io_error: cannot flush file: {e}"))?;
 
     move_tmp_into_place(&tmp, target)?;
+    on_progress(size, total.or(Some(size)), true);
 
     Ok(())
+}
+
+fn emit_transfer_progress(
+    app: &AppHandle,
+    event_name: &str,
+    downloaded: u64,
+    total: Option<u64>,
+    done: bool,
+) {
+    let _ = app.emit(
+        event_name,
+        TransferProgressPayload {
+            downloaded,
+            total,
+            done,
+        },
+    );
 }
 
 fn ensure_executable_exists(executable_path: &Path) -> Result<(), String> {
@@ -683,7 +754,7 @@ mod tests {
         let target = dir.path().join("artifact.bin");
         let url = format!("{}/artifact", server.uri());
 
-        download_file_with_retry(&client, &url, &target, 1024)
+        download_file_with_retry(&client, &url, &target, 1024, |_, _, _| {})
             .await
             .expect("download should succeed");
 

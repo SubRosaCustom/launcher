@@ -1,6 +1,6 @@
 [package]
 name = "srclauncher"
-version = "0.1.0"
+version = "0.1.1"
 description = "SRCLauncher"
 authors = ["you"]
 edition = "2021"

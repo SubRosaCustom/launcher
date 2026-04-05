@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import logoImage from './assets/logo.png';
 import './App.css';
@@ -44,9 +45,40 @@ const configuredLibraryRequest: LibraryDownloadRequest = {
   repo: GH_REPO,
 };
 
+const CLIENT_DOWNLOAD_PROGRESS_EVENT = 'client-download-progress';
+const LAUNCHER_UPDATE_PROGRESS_EVENT = 'launcher-update-progress';
+const PROGRESS_BAR_WIDTH = 20;
+
+interface LogEntry {
+  id: number;
+  message: string;
+  key?: string;
+}
+
+interface TransferProgressPayload {
+  downloaded: number;
+  total: number | null;
+  done: boolean;
+}
+
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatProgressBar(label: string, payload: TransferProgressPayload) {
+  const total = payload.total ?? payload.downloaded;
+  const ratio = total > 0 ? Math.min(payload.downloaded / total, 1) : 0;
+  const filled = payload.done ? PROGRESS_BAR_WIDTH : Math.round(ratio * PROGRESS_BAR_WIDTH);
+  const bar = `${'#'.repeat(filled)}${'-'.repeat(PROGRESS_BAR_WIDTH - filled)}`;
+  const percent = payload.done ? 100 : Math.round(ratio * 100);
+  return `${label} [${bar}] ${percent}% (${formatBytes(payload.downloaded)}/${formatBytes(total)})`;
+}
+
 function App() {
   const [phase, setPhase] = useState<Phase>('idle');
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [settings, setSettings] = useState<LauncherSettings>({
     executableName: defaultExecutableName,
     closeOnLaunch: false,
@@ -64,11 +96,52 @@ function App() {
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [activeSupportAction, setActiveSupportAction] = useState<string | null>(null);
   const [isInstallingLauncherUpdate, setIsInstallingLauncherUpdate] = useState(false);
+  const nextLogId = useRef(1);
+  const attemptedLauncherUpdate = useRef(false);
 
   const appendLog = (message: string) => {
-    setLogs((currentLogs) => [...currentLogs, message]);
+    setLogs((currentLogs) => [...currentLogs, { id: nextLogId.current++, message }]);
     void appendLauncherLog(message).catch(() => undefined);
   };
+
+  const upsertLog = (key: string, message: string) => {
+    setLogs((currentLogs) => {
+      const idx = currentLogs.findIndex((entry) => entry.key === key);
+      if (idx === -1) {
+        return [...currentLogs, { id: nextLogId.current++, key, message }];
+      }
+      const next = [...currentLogs];
+      next[idx] = { ...next[idx], message };
+      return next;
+    });
+  };
+
+  const removeLog = (key: string) => {
+    setLogs((currentLogs) => currentLogs.filter((entry) => entry.key !== key));
+  };
+
+  useEffect(() => {
+    let disposed = false;
+
+    const unlistenPromises = [
+      listen<TransferProgressPayload>(CLIENT_DOWNLOAD_PROGRESS_EVENT, (event) => {
+        if (disposed) return;
+        upsertLog('client-progress', formatProgressBar('Client', event.payload));
+        if (event.payload.done) {
+          setTimeout(() => removeLog('client-progress'), 1200);
+        }
+      }),
+      listen<TransferProgressPayload>(LAUNCHER_UPDATE_PROGRESS_EVENT, (event) => {
+        if (disposed) return;
+        upsertLog('launcher-progress', formatProgressBar('Launcher', event.payload));
+      }),
+    ];
+
+    return () => {
+      disposed = true;
+      void Promise.all(unlistenPromises).then((fns) => fns.forEach((fn) => fn()));
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +195,20 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (!launcherUpdate.available || attemptedLauncherUpdate.current) return;
+
+    attemptedLauncherUpdate.current = true;
+    setIsInstallingLauncherUpdate(true);
+    appendLog(`Installing launcher update: ${launcherUpdate.version}`);
+    void installLauncherUpdate().catch((error) => {
+      removeLog('launcher-progress');
+      appendLog(`Launcher update failed: ${String(error)}`);
+      setIsInstallingLauncherUpdate(false);
+      attemptedLauncherUpdate.current = false;
+    });
+  }, [launcherUpdate.available, launcherUpdate.version]);
+
+  useEffect(() => {
     if (phase !== 'running') return;
 
     const timeoutId = setTimeout(() => {
@@ -164,19 +251,6 @@ function App() {
     } catch (e) {
       appendLog(`Launch failed: ${String(e)}`);
       setPhase('idle');
-    }
-  };
-
-  const handleLauncherUpdate = async () => {
-    if (!launcherUpdate.available || isInstallingLauncherUpdate) return;
-
-    setIsInstallingLauncherUpdate(true);
-    try {
-      appendLog(`Installing launcher update: ${launcherUpdate.version}`);
-      await installLauncherUpdate();
-    } catch (e) {
-      appendLog(`Launcher update failed: ${String(e)}`);
-      setIsInstallingLauncherUpdate(false);
     }
   };
 
@@ -255,39 +329,26 @@ function App() {
         <button
           className={`action-btn ${phase !== 'idle' ? 'is-processing' : ''}`}
           onClick={handleLaunch}
-          disabled={phase !== 'idle'}
+          disabled={phase !== 'idle' || isInstallingLauncherUpdate}
         >
-          <span className="btn-label">{phaseLabels[phase]}</span>
+          <span className="btn-label">
+            {isInstallingLauncherUpdate ? 'Updating Launcher' : phaseLabels[phase]}
+          </span>
         </button>
-        {launcherUpdate.enabled ? (
-          <button
-            className={`action-btn ${isInstallingLauncherUpdate ? 'is-processing' : ''}`}
-            onClick={handleLauncherUpdate}
-            disabled={!launcherUpdate.available || isInstallingLauncherUpdate || phase !== 'idle'}
-          >
-            <span className="btn-label">
-              {isInstallingLauncherUpdate
-                ? 'Updating Launcher'
-                : launcherUpdate.available
-                  ? `Update Launcher`
-                  : 'Launcher Up To Date'}
-            </span>
-          </button>
-        ) : null}
         <button className="action-btn" onClick={() => setIsSettingsOpen(true)}>
           <span className="btn-label">Settings</span>
         </button>
       </div>
 
       <div className="log-stack-container">
-        {logs.slice(-4).map((msg, i, arr) => {
+        {logs.slice(-4).map((entry, i, arr) => {
           const d = arr.length - i - 1;
           return (
             <div
-              key={`${i}-${msg}`}
+              key={entry.id}
               className={`log-entry log-depth-${d} ${d === 0 ? 'log-latest' : ''}`}
             >
-              <span className="log-content">{msg}</span>
+              <span className="log-content">{entry.message}</span>
             </div>
           );
         })}
