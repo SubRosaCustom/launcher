@@ -28,8 +28,10 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-22.04
+            rust: stable
             args: ""
           - platform: windows-latest
+            rust: nightly
             args: ""
     runs-on: ${{ matrix.platform }}
     env:
@@ -50,6 +52,14 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.rust }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> src-tauri/target
 
       - name: Install Linux system dependencies
         if: matrix.platform == 'ubuntu-22.04'
