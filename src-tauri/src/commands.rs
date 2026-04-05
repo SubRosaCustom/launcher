@@ -1,5 +1,5 @@
 use reqwest::StatusCode;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
     io::Write,
@@ -55,6 +55,18 @@ pub struct DiagnosticsArgs {
     pub repo: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseVersion {
+    pub value: String,
+}
+
 #[tauri::command]
 pub fn load_settings(app: AppHandle) -> Result<LauncherSettings, String> {
     settings::load_settings(&app)
@@ -105,6 +117,35 @@ pub fn collect_diagnostics(app: AppHandle, args: DiagnosticsArgs) -> Result<Stri
 #[tauri::command]
 pub fn copy_text_to_clipboard(text: String) -> Result<(), String> {
     support::copy_text_to_clipboard(&text)
+}
+
+#[tauri::command]
+pub async fn get_release_version(args: RepoArgs) -> Result<ReleaseVersion, String> {
+    let repo = normalize_repo(&args.repo)?;
+    let client = build_http_client()?;
+    let release_url = github_release_api_url(&repo, RELEASE_TAG);
+    let response = client
+        .get(&release_url)
+        .send()
+        .await
+        .map_err(classify_request_error)?;
+    classify_status(response.status())?;
+    let release_bytes = response
+        .bytes()
+        .await
+        .map_err(classify_request_error)?
+        .to_vec();
+    let release: GitHubRelease = serde_json::from_slice(&release_bytes)
+        .map_err(|e| format!("release_metadata_invalid_json: {e}"))?;
+    let value = if release.name.trim().is_empty() {
+        release.tag_name.trim().to_string()
+    } else {
+        release.name.trim().to_string()
+    };
+    if value.is_empty() {
+        return Err("release_metadata_missing_version".into());
+    }
+    Ok(ReleaseVersion { value })
 }
 
 #[tauri::command]
@@ -299,11 +340,11 @@ fn unique_tmp_path(target: &Path) -> Result<PathBuf, String> {
 fn platform_library_name() -> &'static str {
     #[cfg(target_os = "windows")]
     {
-        "client.dll"
+        "srcustom.dll"
     }
     #[cfg(target_os = "linux")]
     {
-        "client.so"
+        "libsrcustom.so"
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
@@ -313,6 +354,10 @@ fn platform_library_name() -> &'static str {
 
 fn github_release_asset_url(repo: &str, tag: &str, asset_name: &str) -> String {
     format!("https://github.com/{repo}/releases/download/{tag}/{asset_name}")
+}
+
+fn github_release_api_url(repo: &str, tag: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/tags/{tag}")
 }
 
 fn normalize_repo(repo: &str) -> Result<String, String> {
@@ -541,9 +586,9 @@ mod tests {
     #[test]
     fn platform_library_name_matches_current_target() {
         #[cfg(target_os = "windows")]
-        assert_eq!(platform_library_name(), "client.dll");
+        assert_eq!(platform_library_name(), "srcustom.dll");
         #[cfg(target_os = "linux")]
-        assert_eq!(platform_library_name(), "client.so");
+        assert_eq!(platform_library_name(), "libsrcustom.so");
     }
 
     #[tokio::test]

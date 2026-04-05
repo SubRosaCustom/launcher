@@ -3,6 +3,7 @@ import type {
   DetectionResult,
   LibraryDownloadRequest,
   LauncherSettings,
+  ReleaseVersion,
 } from '../types/launcher';
 
 export function loadSettings() {
@@ -43,6 +44,10 @@ export function collectDiagnostics(repo?: string) {
 
 export function copyTextToClipboard(text: string) {
   return invoke<void>('copy_text_to_clipboard', { text });
+}
+
+export function getReleaseVersion(repo: string) {
+  return invoke<ReleaseVersion>('get_release_version', { args: { repo } });
 }
 
 export function downloadInjectionLibrary(request: LibraryDownloadRequest) {

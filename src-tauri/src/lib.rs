@@ -16,6 +16,7 @@ pub fn run() {
             commands::clear_cache,
             commands::collect_diagnostics,
             commands::copy_text_to_clipboard,
+            commands::get_release_version,
             commands::download_injection_library,
             commands::launch_game
         ])

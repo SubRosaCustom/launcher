@@ -71,6 +71,12 @@ body {
   filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.5));
 }
 
+.version-label {
+  font-size: 0.75rem;
+  color: var(--muted);
+margin-top: -6px;
+}
+
 button,
 input,
 label {

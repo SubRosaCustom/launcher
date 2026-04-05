@@ -14,3 +14,7 @@ export interface DetectionResult {
   gameDir: string | null;
   executableCandidates: string[];
 }
+
+export interface ReleaseVersion {
+  value: string;
+}

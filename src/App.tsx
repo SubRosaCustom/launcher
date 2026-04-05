@@ -11,6 +11,7 @@ import {
   detectSubrosa,
   downloadInjectionLibrary,
   forceRedownload,
+  getReleaseVersion,
   launchGame,
   loadSettings,
   openCacheFolder,
@@ -48,6 +49,7 @@ function App() {
     closeOnLaunch: false,
   });
   const [detection, setDetection] = useState<DetectionResult | null>(null);
+  const [releaseVersion, setReleaseVersion] = useState('Unknown');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [activeSupportAction, setActiveSupportAction] = useState<string | null>(null);
@@ -62,11 +64,16 @@ function App() {
 
     const initialize = async () => {
       try {
-        const [loadedSettings, detectedGame] = await Promise.all([loadSettings(), detectSubrosa()]);
+        const [loadedSettings, detectedGame, release] = await Promise.all([
+          loadSettings(),
+          detectSubrosa(),
+          getReleaseVersion(configuredLibraryRequest.repo),
+        ]);
         if (cancelled) return;
 
         setSettings(loadedSettings);
         setDetection(detectedGame);
+        setReleaseVersion(release.value);
         appendLog(
           detectedGame.gameDir
             ? `Sub Rosa found: ${detectedGame.gameDir}`
@@ -84,6 +91,16 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (phase !== 'running') return;
+
+    const timeoutId = setTimeout(() => {
+      setPhase((current) => (current === 'running' ? 'idle' : current));
+    }, 5000);
+
+    return () => clearTimeout(timeoutId);
+  }, [phase]);
 
   const handleLaunch = async () => {
     if (phase !== 'idle') return;
@@ -191,6 +208,7 @@ function App() {
 
       <div className="launcher-shell">
         <img src={logoImage} alt="Sub Rosa logo" className="logo" />
+        <p className="version-label">version: {releaseVersion}</p>
         <button
           className={`action-btn ${phase !== 'idle' ? 'is-processing' : ''}`}
           onClick={handleLaunch}
