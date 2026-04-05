@@ -91,7 +91,7 @@ jobs:
         with:
           tagName: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || 'launcher-v__VERSION__' }}
           releaseName: ${{ github.event_name == 'workflow_dispatch' && (inputs.release_name || inputs.release_tag) || 'SRC Launcher v__VERSION__' }}
-          releaseBody: "Automated launcher release."
+          releaseBody: ""
           prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease == 'true' || false }}
           generateReleaseNotes: true
           args: ${{ matrix.args }}

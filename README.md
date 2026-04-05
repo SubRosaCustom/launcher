@@ -7,6 +7,22 @@ Downloads the latest release for your platfrom from SubRosaCustom/client_release
 
 The launcher binary can also self-update from `SubRosaCustom/launcher` GitHub releases when the updater public key is baked in at build time through `SRC_LAUNCHER_UPDATER_PUBKEY`.
 
+## Installation
+
+1. Open the latest release in `SubRosaCustom/launcher`.
+2. Download the file for your platform.
+3. Install or run it:
+   Windows: use `srclauncher_<version>_x64-setup.exe` or `srclauncher_<version>_x64_en-US.msi`
+   Linux: use `srclauncher_<version>_amd64.AppImage`
+4. Launch SRCLauncher.
+5. If Sub Rosa is not detected automatically, set the executable path in Settings.
+
+Notes:
+- Linux `AppImage` may need `chmod +x srclauncher_<version>_amd64.AppImage` before first run
+- `.deb` and `.rpm` releases are optional package formats; `AppImage` is the simplest Linux path
+- Launcher updates come from `SubRosaCustom/launcher`
+- Client DLL/SO updates come from `SubRosaCustom/client_releases`
+
 Launcher release requirements:
 - publish releases in `SubRosaCustom/launcher`
 - attach signed Tauri updater artifacts and `latest.json`

@@ -61,6 +61,18 @@ interface TransferProgressPayload {
   done: boolean;
 }
 
+function formatLauncherNotes(notes: string | null) {
+  if (!notes || !notes.trim()) {
+    return ['No changelog available for this launcher update.'];
+  }
+
+  return notes
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
 function formatBytes(value: number) {
   if (value < 1024) return `${value} B`;
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
@@ -97,7 +109,7 @@ function App() {
   const [activeSupportAction, setActiveSupportAction] = useState<string | null>(null);
   const [isInstallingLauncherUpdate, setIsInstallingLauncherUpdate] = useState(false);
   const nextLogId = useRef(1);
-  const attemptedLauncherUpdate = useRef(false);
+  const [showLauncherUpdatePrompt, setShowLauncherUpdatePrompt] = useState(false);
 
   const appendLog = (message: string) => {
     setLogs((currentLogs) => [...currentLogs, { id: nextLogId.current++, message }]);
@@ -195,18 +207,13 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!launcherUpdate.available || attemptedLauncherUpdate.current) return;
+    if (!launcherUpdate.available) {
+      setShowLauncherUpdatePrompt(false);
+      return;
+    }
 
-    attemptedLauncherUpdate.current = true;
-    setIsInstallingLauncherUpdate(true);
-    appendLog(`Installing launcher update: ${launcherUpdate.version}`);
-    void installLauncherUpdate().catch((error) => {
-      removeLog('launcher-progress');
-      appendLog(`Launcher update failed: ${String(error)}`);
-      setIsInstallingLauncherUpdate(false);
-      attemptedLauncherUpdate.current = false;
-    });
-  }, [launcherUpdate.available, launcherUpdate.version]);
+    setShowLauncherUpdatePrompt(true);
+  }, [launcherUpdate.available, launcherUpdate.version, launcherUpdate.notes]);
 
   useEffect(() => {
     if (phase !== 'running') return;
@@ -318,6 +325,27 @@ function App() {
       appendLog('Diagnostics copied to clipboard.');
     });
 
+  const handleInstallLauncherUpdate = async () => {
+    if (!launcherUpdate.available || isInstallingLauncherUpdate) return;
+
+    setIsInstallingLauncherUpdate(true);
+    setShowLauncherUpdatePrompt(false);
+    appendLog(`Installing launcher update: ${launcherUpdate.version}`);
+    try {
+      await installLauncherUpdate();
+    } catch (error) {
+      removeLog('launcher-progress');
+      appendLog(`Launcher update failed: ${String(error)}`);
+      setIsInstallingLauncherUpdate(false);
+      setShowLauncherUpdatePrompt(true);
+    }
+  };
+
+  const handleDismissLauncherUpdate = () => {
+    setShowLauncherUpdatePrompt(false);
+    appendLog(`Skipped launcher update: ${launcherUpdate.version}`);
+  };
+
   return (
     <main className="viewport">
       <div className="noise-overlay" />
@@ -368,6 +396,30 @@ function App() {
         onClearCache={handleClearCache}
         onCopyDiagnostics={handleCopyDiagnostics}
       />
+
+      {showLauncherUpdatePrompt ? (
+        <div className="update-modal-backdrop">
+          <div className="update-modal">
+            <p className="update-modal-title">Launcher update available</p>
+            <p className="hint">Install version {launcherUpdate.version}</p>
+            <div className="update-notes">
+              {formatLauncherNotes(launcherUpdate.notes).map((line, index) => (
+                <p key={`${index}-${line}`} className="update-note-line">
+                  {line}
+                </p>
+              ))}
+            </div>
+            <div className="update-modal-actions">
+              <button className="action-btn" onClick={handleInstallLauncherUpdate}>
+                <span className="btn-label">Install</span>
+              </button>
+              <button className="action-btn" onClick={handleDismissLauncherUpdate}>
+                <span className="btn-label">Not Now</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
