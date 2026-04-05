@@ -70,6 +70,20 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Inject updater public key into Tauri config
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          config_path = Path("src-tauri/tauri.conf.json")
+          config = json.loads(config_path.read_text())
+          config["plugins"]["updater"]["pubkey"] = os.environ["SRC_LAUNCHER_UPDATER_PUBKEY"]
+          config_path.write_text(json.dumps(config, indent=2) + "\n")
+          PY
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@action-v0.6.2
         env:
