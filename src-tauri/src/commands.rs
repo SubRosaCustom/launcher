@@ -66,12 +66,21 @@ pub struct DiagnosticsArgs {
 struct GitHubRelease {
     tag_name: String,
     name: String,
+    published_at: Option<String>,
+    assets: Vec<GitHubReleaseAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubReleaseAsset {
+    name: String,
+    browser_download_url: String,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseVersion {
     pub value: String,
+    pub published_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -237,20 +246,7 @@ pub async fn install_launcher_update(app: AppHandle) -> Result<(), String> {
 pub async fn get_release_version(args: RepoArgs) -> Result<ReleaseVersion, String> {
     let repo = normalize_repo(&args.repo)?;
     let client = build_http_client()?;
-    let release_url = github_release_api_url(&repo, RELEASE_TAG);
-    let response = client
-        .get(&release_url)
-        .send()
-        .await
-        .map_err(classify_request_error)?;
-    classify_status(response.status())?;
-    let release_bytes = response
-        .bytes()
-        .await
-        .map_err(classify_request_error)?
-        .to_vec();
-    let release: GitHubRelease = serde_json::from_slice(&release_bytes)
-        .map_err(|e| format!("release_metadata_invalid_json: {e}"))?;
+    let release = fetch_github_release(&client, &repo, RELEASE_TAG).await?;
     let value = if release.name.trim().is_empty() {
         release.tag_name.trim().to_string()
     } else {
@@ -259,7 +255,10 @@ pub async fn get_release_version(args: RepoArgs) -> Result<ReleaseVersion, Strin
     if value.is_empty() {
         return Err("release_metadata_missing_version".into());
     }
-    Ok(ReleaseVersion { value })
+    Ok(ReleaseVersion {
+        value,
+        published_at: release.published_at,
+    })
 }
 
 #[tauri::command]
@@ -276,7 +275,17 @@ pub async fn download_injection_library(
     let client = build_http_client()?;
 
     let library_name = platform_library_name();
-    let artifact_url = github_release_asset_url(&repo, RELEASE_TAG, library_name);
+    let release = fetch_github_release(&client, &repo, RELEASE_TAG).await?;
+    let artifact_url = release
+        .assets
+        .iter()
+        .find(|asset| asset.name == library_name)
+        .map(|asset| asset.browser_download_url.clone())
+        .ok_or_else(|| {
+            format!(
+                "release_asset_missing: repo={repo} tag={RELEASE_TAG} asset={library_name}"
+            )
+        })?;
 
     let cache_dir = support::repo_cache_dir(&app, &repo)?;
     let cached_artifact_path = cache_dir.join(library_name);
@@ -498,12 +507,29 @@ fn platform_library_name() -> &'static str {
     }
 }
 
-fn github_release_asset_url(repo: &str, tag: &str, asset_name: &str) -> String {
-    format!("https://github.com/{repo}/releases/download/{tag}/{asset_name}")
-}
-
 fn github_release_api_url(repo: &str, tag: &str) -> String {
     format!("https://api.github.com/repos/{repo}/releases/tags/{tag}")
+}
+
+async fn fetch_github_release(
+    client: &reqwest::Client,
+    repo: &str,
+    tag: &str,
+) -> Result<GitHubRelease, String> {
+    let release_url = github_release_api_url(repo, tag);
+    let response = client
+        .get(&release_url)
+        .send()
+        .await
+        .map_err(classify_request_error)?;
+    classify_status(response.status())?;
+    let release_bytes = response
+        .bytes()
+        .await
+        .map_err(classify_request_error)?
+        .to_vec();
+    serde_json::from_slice(&release_bytes)
+        .map_err(|e| format!("release_metadata_invalid_json: {e}"))
 }
 
 fn normalize_repo(repo: &str) -> Result<String, String> {

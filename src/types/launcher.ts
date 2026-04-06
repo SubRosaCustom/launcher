@@ -17,6 +17,7 @@ export interface DetectionResult {
 
 export interface ReleaseVersion {
   value: string;
+  publishedAt: string | null;
 }
 
 export interface LauncherUpdateState {

@@ -3,8 +3,9 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    time::{SystemTime, UNIX_EPOCH},
+    time::SystemTime,
 };
+use chrono::{DateTime, Utc};
 use tauri::{AppHandle, Manager};
 
 use crate::{settings, steam};
@@ -61,7 +62,7 @@ pub fn append_launcher_log(app: &AppHandle, message: &str) -> Result<(), String>
         .open(&log_path)
         .map_err(|e| format!("io_error: cannot open log file: {e}"))?;
 
-    writeln!(file, "[{}] {}", unix_timestamp_secs(), trimmed)
+    writeln!(file, "[{}] {}", timestamp_rfc3339_now(), trimmed)
         .map_err(|e| format!("io_error: cannot write log file: {e}"))
 }
 
@@ -88,7 +89,7 @@ pub fn collect_diagnostics(app: &AppHandle, repo: Option<&str>) -> Result<String
     };
 
     let mut diagnostics = vec![
-        format!("timestamp={}", unix_timestamp_secs()),
+        format!("timestamp={}", timestamp_rfc3339_now()),
         format!("launcher.version={}", env!("CARGO_PKG_VERSION")),
         format!("platform.os={}", std::env::consts::OS),
         format!("platform.arch={}", std::env::consts::ARCH),
@@ -323,9 +324,7 @@ fn run_copy_command(program: &str, args: &[&str], text: &str) -> Result<(), Stri
     }
 }
 
-fn unix_timestamp_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default()
+fn timestamp_rfc3339_now() -> String {
+    let timestamp: DateTime<Utc> = SystemTime::now().into();
+    timestamp.to_rfc3339()
 }

@@ -74,7 +74,15 @@ body {
 .version-label {
   font-size: 0.75rem;
   color: var(--muted);
-margin-top: -6px;
+  margin: 0px -6px;
+}
+
+.release-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-direction: column;
+  gap: 0px;
 }
 
 button,

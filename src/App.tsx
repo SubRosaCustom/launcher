@@ -256,7 +256,14 @@ function App() {
         await getCurrentWindow().close();
       }
     } catch (e) {
-      appendLog(`Launch failed: ${String(e)}`);
+      const message = String(e);
+      if (message.includes('release_asset_missing:')) {
+        appendLog(`Launch failed: client release asset missing in ${configuredLibraryRequest.repo} tag "release".`);
+      } else if (message.includes('download_http_status: 404')) {
+        appendLog(`Launch failed: client release download returned 404 from ${configuredLibraryRequest.repo}.`);
+      } else {
+        appendLog(`Launch failed: ${message}`);
+      }
       setPhase('idle');
     }
   };
@@ -352,8 +359,10 @@ function App() {
 
       <div className="launcher-shell">
         <img src={logoImage} alt="Sub Rosa logo" className="logo" />
-        <p className="version-label">launcher: {launcherUpdate.currentVersion}</p>
-        <p className="version-label">client: {releaseVersion}</p>
+        <div className="release-info">
+          <p className="version-label">launcher: {launcherUpdate.currentVersion}</p>
+          <p className="version-label">client: {releaseVersion}</p>
+        </div>
         <button
           className={`action-btn ${phase !== 'idle' ? 'is-processing' : ''}`}
           onClick={handleLaunch}
