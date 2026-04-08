@@ -21,7 +21,6 @@ use crate::{
     steam, support,
 };
 
-const RELEASE_TAG: &str = "release";
 const LIBRARY_MAX_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 const RETRY_DELAYS_MS: [u64; 2] = [250, 750];
@@ -246,7 +245,7 @@ pub async fn install_launcher_update(app: AppHandle) -> Result<(), String> {
 pub async fn get_release_version(args: RepoArgs) -> Result<ReleaseVersion, String> {
     let repo = normalize_repo(&args.repo)?;
     let client = build_http_client()?;
-    let release = fetch_github_release(&client, &repo, RELEASE_TAG).await?;
+    let release = fetch_github_latest_release(&client, &repo).await?;
     let value = if release.name.trim().is_empty() {
         release.tag_name.trim().to_string()
     } else {
@@ -275,7 +274,7 @@ pub async fn download_injection_library(
     let client = build_http_client()?;
 
     let library_name = platform_library_name();
-    let release = fetch_github_release(&client, &repo, RELEASE_TAG).await?;
+    let release = fetch_github_latest_release(&client, &repo).await?;
     let artifact_url = release
         .assets
         .iter()
@@ -283,7 +282,7 @@ pub async fn download_injection_library(
         .map(|asset| asset.browser_download_url.clone())
         .ok_or_else(|| {
             format!(
-                "release_asset_missing: repo={repo} tag={RELEASE_TAG} asset={library_name}"
+                "release_asset_missing: repo={repo} release=latest asset={library_name}"
             )
         })?;
 
@@ -507,16 +506,15 @@ fn platform_library_name() -> &'static str {
     }
 }
 
-fn github_release_api_url(repo: &str, tag: &str) -> String {
-    format!("https://api.github.com/repos/{repo}/releases/tags/{tag}")
+fn github_latest_release_api_url(repo: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/latest")
 }
 
-async fn fetch_github_release(
+async fn fetch_github_latest_release(
     client: &reqwest::Client,
     repo: &str,
-    tag: &str,
 ) -> Result<GitHubRelease, String> {
-    let release_url = github_release_api_url(repo, tag);
+    let release_url = github_latest_release_api_url(repo);
     let response = client
         .get(&release_url)
         .send()

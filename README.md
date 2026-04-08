@@ -3,7 +3,7 @@
 [![ci](https://github.com/SubRosaCustom/launcher/actions/workflows/ci.yml/badge.svg)](https://github.com/SubRosaCustom/launcher/actions/workflows/ci.yml)
 [![release](https://github.com/SubRosaCustom/launcher/actions/workflows/release.yml/badge.svg)](https://github.com/SubRosaCustom/launcher/actions/workflows/release.yml)
 
-Downloads the latest release for your platfrom from SubRosaCustom/client_releases GitHub repo and loads it into the game
+Downloads the latest GitHub release for your platfrom from SubRosaCustom/client_releases and loads it into the game
 
 The launcher binary can also self-update from `SubRosaCustom/launcher` GitHub releases when the updater public key is baked in at build time through `SRC_LAUNCHER_UPDATER_PUBKEY`.
 

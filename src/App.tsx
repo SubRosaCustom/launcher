@@ -258,7 +258,7 @@ function App() {
     } catch (e) {
       const message = String(e);
       if (message.includes('release_asset_missing:')) {
-        appendLog(`Launch failed: client release asset missing in ${configuredLibraryRequest.repo} tag "release".`);
+        appendLog(`Launch failed: client release asset missing in latest release from ${configuredLibraryRequest.repo}.`);
       } else if (message.includes('download_http_status: 404')) {
         appendLog(`Launch failed: client release download returned 404 from ${configuredLibraryRequest.repo}.`);
       } else {
