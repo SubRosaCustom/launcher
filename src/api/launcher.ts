@@ -23,8 +23,16 @@ export function appendLauncherLog(message: string) {
   return invoke<void>('append_launcher_log', { message });
 }
 
-export function openLogs() {
-  return invoke<string>('open_logs');
+export function openLauncherLogs() {
+  return invoke<string>('open_launcher_logs');
+}
+
+export function openClientCrashlogsFolder() {
+  return invoke<string>('open_client_crashlogs_folder');
+}
+
+export function openClientConfigFolder() {
+  return invoke<string>('open_client_config_folder');
 }
 
 export function openCacheFolder() {
@@ -39,8 +47,12 @@ export function clearCache() {
   return invoke<string>('clear_cache');
 }
 
-export function collectDiagnostics(repo?: string) {
-  return invoke<string>('collect_diagnostics', { args: { repo } });
+export function collectLauncherDiagnostics(repo?: string) {
+  return invoke<string>('collect_launcher_diagnostics', { args: { repo } });
+}
+
+export function collectClientDiagnostics() {
+  return invoke<string>('collect_client_diagnostics');
 }
 
 export function copyTextToClipboard(text: string) {

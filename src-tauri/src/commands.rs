@@ -57,7 +57,7 @@ pub struct RepoArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DiagnosticsArgs {
+pub struct RepoDiagnosticsArgs {
     pub repo: Option<String>,
 }
 
@@ -121,8 +121,18 @@ pub fn append_launcher_log(app: AppHandle, message: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn open_logs(app: AppHandle) -> Result<String, String> {
-    support::open_logs(&app)
+pub fn open_launcher_logs(app: AppHandle) -> Result<String, String> {
+    support::open_launcher_logs(&app)
+}
+
+#[tauri::command]
+pub fn open_client_crashlogs_folder() -> Result<String, String> {
+    support::open_client_crashlogs_folder()
+}
+
+#[tauri::command]
+pub fn open_client_config_folder() -> Result<String, String> {
+    support::open_client_config_folder()
 }
 
 #[tauri::command]
@@ -142,9 +152,17 @@ pub fn clear_cache(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn collect_diagnostics(app: AppHandle, args: DiagnosticsArgs) -> Result<String, String> {
+pub fn collect_launcher_diagnostics(
+    app: AppHandle,
+    args: RepoDiagnosticsArgs,
+) -> Result<String, String> {
     let repo = args.repo.as_deref().map(normalize_repo).transpose()?;
-    support::collect_diagnostics(&app, repo.as_deref())
+    support::collect_launcher_diagnostics(&app, repo.as_deref())
+}
+
+#[tauri::command]
+pub fn collect_client_diagnostics() -> Result<String, String> {
+    support::collect_client_diagnostics()
 }
 
 #[tauri::command]
@@ -213,9 +231,8 @@ pub async fn install_launcher_update(app: AppHandle) -> Result<(), String> {
     update
         .download_and_install(
             |chunk_length, content_length| {
-                let current =
-                    on_chunk_downloaded.fetch_add(chunk_length as u64, Ordering::Relaxed)
-                        + chunk_length as u64;
+                let current = on_chunk_downloaded.fetch_add(chunk_length as u64, Ordering::Relaxed)
+                    + chunk_length as u64;
                 emit_transfer_progress(
                     &app,
                     LAUNCHER_UPDATE_PROGRESS_EVENT,
@@ -281,12 +298,13 @@ pub async fn download_injection_library(
         .find(|asset| asset.name == library_name)
         .map(|asset| asset.browser_download_url.clone())
         .ok_or_else(|| {
-            format!(
-                "release_asset_missing: repo={repo} release=latest asset={library_name}"
-            )
+            format!("release_asset_missing: repo={repo} release=latest asset={library_name}")
         })?;
 
-    let cache_dir = support::repo_cache_dir(&app, &repo)?;
+    let cache_dir =
+        support::repo_cache_dir(&app, &repo)?.join(support::sanitize_path_part(&release.tag_name));
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("io_error: cannot create release cache dir: {e}"))?;
     let cached_artifact_path = cache_dir.join(library_name);
     if cached_artifact_path.exists() {
         return Ok(cached_artifact_path.to_string_lossy().into_owned());

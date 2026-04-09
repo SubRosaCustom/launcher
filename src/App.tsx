@@ -7,7 +7,8 @@ import SettingsPanel from './components/SettingsPanel';
 import {
   appendLauncherLog,
   clearCache,
-  collectDiagnostics,
+  collectClientDiagnostics,
+  collectLauncherDiagnostics,
   copyTextToClipboard,
   detectSubrosa,
   downloadInjectionLibrary,
@@ -18,7 +19,9 @@ import {
   launchGame,
   loadSettings,
   openCacheFolder,
-  openLogs,
+  openClientConfigFolder,
+  openClientCrashlogsFolder,
+  openLauncherLogs,
   saveSettings,
 } from './api/launcher';
 import type {
@@ -295,10 +298,30 @@ function App() {
     }
   };
 
-  const handleOpenLogs = () =>
-    void runSupportAction('openLogs', async () => {
-      const path = await openLogs();
-      appendLog(`Opened logs: ${path}`);
+  const copySupportText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      await copyTextToClipboard(text);
+    }
+  };
+
+  const handleOpenLauncherLogs = () =>
+    void runSupportAction('openLauncherLogs', async () => {
+      const path = await openLauncherLogs();
+      appendLog(`Opened launcher logs: ${path}`);
+    });
+
+  const handleOpenClientCrashlogsFolder = () =>
+    void runSupportAction('openClientCrashlogsFolder', async () => {
+      const path = await openClientCrashlogsFolder();
+      appendLog(`Opened client crashlogs: ${path}`);
+    });
+
+  const handleOpenClientConfigFolder = () =>
+    void runSupportAction('openClientConfigFolder', async () => {
+      const path = await openClientConfigFolder();
+      appendLog(`Opened client config folder: ${path}`);
     });
 
   const handleOpenCacheFolder = () =>
@@ -319,17 +342,18 @@ function App() {
       appendLog(`Cleared launcher cache: ${path}`);
     });
 
-  const handleCopyDiagnostics = () =>
-    void runSupportAction('copyDiagnostics', async () => {
-      const diagnostics = await collectDiagnostics(configuredLibraryRequest.repo);
+  const handleCopyLauncherDiagnostics = () =>
+    void runSupportAction('copyLauncherDiagnostics', async () => {
+      const diagnostics = await collectLauncherDiagnostics(configuredLibraryRequest.repo);
+      await copySupportText(diagnostics);
+      appendLog('Launcher diagnostics copied to clipboard.');
+    });
 
-      try {
-        await navigator.clipboard.writeText(diagnostics);
-      } catch {
-        await copyTextToClipboard(diagnostics);
-      }
-
-      appendLog('Diagnostics copied to clipboard.');
+  const handleCopyClientDiagnostics = () =>
+    void runSupportAction('copyClientDiagnostics', async () => {
+      const diagnostics = await collectClientDiagnostics();
+      await copySupportText(diagnostics);
+      appendLog('Client diagnostics copied to clipboard.');
     });
 
   const handleInstallLauncherUpdate = async () => {
@@ -399,11 +423,14 @@ function App() {
         executableCandidates={detection?.executableCandidates ?? []}
         onSave={handleSettingsSave}
         onClose={() => setIsSettingsOpen(false)}
-        onOpenLogs={handleOpenLogs}
+        onOpenLauncherLogs={handleOpenLauncherLogs}
+        onOpenClientCrashlogsFolder={handleOpenClientCrashlogsFolder}
+        onOpenClientConfigFolder={handleOpenClientConfigFolder}
         onOpenCacheFolder={handleOpenCacheFolder}
         onForceRedownload={handleForceRedownload}
         onClearCache={handleClearCache}
-        onCopyDiagnostics={handleCopyDiagnostics}
+        onCopyLauncherDiagnostics={handleCopyLauncherDiagnostics}
+        onCopyClientDiagnostics={handleCopyClientDiagnostics}
       />
 
       {showLauncherUpdatePrompt ? (
