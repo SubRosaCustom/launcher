@@ -209,18 +209,18 @@ pub fn collect_client_diagnostics() -> Result<String, String> {
                     path.display()
                 )
             })?;
-            let crashlog_tail = read_log_tail(&path, 20)?;
+            let crashlog_contents = read_text_file(&path)?;
 
             diagnostics.push(format!("client.latestCrashlog={}", path.to_string_lossy()));
             diagnostics.push(format!("client.latestCrashlog.bytes={}", metadata.len()));
             diagnostics.push(format!("client.latestCrashlog.modified={modified}"));
-            diagnostics.push("client.latestCrashlog.tail.begin".to_string());
-            if crashlog_tail.is_empty() {
+            diagnostics.push("client.latestCrashlog.begin".to_string());
+            if crashlog_contents.is_empty() {
                 diagnostics.push("(empty)".to_string());
             } else {
-                diagnostics.extend(crashlog_tail);
+                diagnostics.extend(crashlog_contents.lines().map(ToString::to_string));
             }
-            diagnostics.push("client.latestCrashlog.tail.end".to_string());
+            diagnostics.push("client.latestCrashlog.end".to_string());
         }
         None => {
             diagnostics.push("client.latestCrashlog=missing".to_string());
@@ -416,6 +416,14 @@ fn read_log_tail(path: &Path, max_lines: usize) -> Result<Vec<String>, String> {
         lines.drain(..lines.len() - max_lines);
     }
     Ok(lines)
+}
+
+fn read_text_file(path: &Path) -> Result<String, String> {
+    if !path.exists() {
+        return Ok(String::new());
+    }
+
+    fs::read_to_string(path).map_err(|e| format!("io_error: cannot read log file: {e}"))
 }
 
 fn latest_file_in_dir(path: &Path) -> Result<Option<PathBuf>, String> {
