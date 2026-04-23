@@ -38,6 +38,8 @@ pub fn run() {
             commands::get_launcher_update_state,
             commands::install_launcher_update,
             commands::get_release_version,
+            commands::get_release_details,
+            commands::get_release_history,
             commands::download_injection_library,
             commands::launch_game
         ])

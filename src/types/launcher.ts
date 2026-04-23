@@ -20,6 +20,13 @@ export interface ReleaseVersion {
   publishedAt: string | null;
 }
 
+export interface ReleaseDetails {
+  tagName: string;
+  value: string;
+  publishedAt: string | null;
+  notes: string | null;
+}
+
 export interface LauncherUpdateState {
   enabled: boolean;
   currentVersion: string;
