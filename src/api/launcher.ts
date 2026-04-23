@@ -4,6 +4,7 @@ import type {
   LauncherUpdateState,
   LibraryDownloadRequest,
   LauncherSettings,
+  ReleaseDetails,
   ReleaseVersion,
 } from '../types/launcher';
 
@@ -69,6 +70,18 @@ export function installLauncherUpdate() {
 
 export function getReleaseVersion(repo: string) {
   return invoke<ReleaseVersion>('get_release_version', { args: { repo } });
+}
+
+export function getReleaseDetails(repo: string, tags?: string[]) {
+  return invoke<ReleaseDetails>('get_release_details', {
+    args: { repo, tags: tags?.length ? tags : null },
+  });
+}
+
+export function getReleaseHistory(repo: string) {
+  return invoke<ReleaseDetails[]>('get_release_history', {
+    args: { repo },
+  });
 }
 
 export function downloadInjectionLibrary(request: LibraryDownloadRequest) {

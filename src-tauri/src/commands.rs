@@ -26,6 +26,7 @@ const MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 const RETRY_DELAYS_MS: [u64; 2] = [250, 750];
 const CONNECT_TIMEOUT_SECS: u64 = 8;
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+const GITHUB_RELEASES_PAGE_SIZE: usize = 100;
 const CLIENT_DOWNLOAD_PROGRESS_EVENT: &str = "client-download-progress";
 const LAUNCHER_UPDATE_PROGRESS_EVENT: &str = "launcher-update-progress";
 
@@ -57,6 +58,13 @@ pub struct RepoArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RepoReleaseArgs {
+    pub repo: String,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RepoDiagnosticsArgs {
     pub repo: Option<String>,
 }
@@ -66,6 +74,7 @@ struct GitHubRelease {
     tag_name: String,
     name: String,
     published_at: Option<String>,
+    body: Option<String>,
     assets: Vec<GitHubReleaseAsset>,
 }
 
@@ -80,6 +89,15 @@ struct GitHubReleaseAsset {
 pub struct ReleaseVersion {
     pub value: String,
     pub published_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseDetails {
+    pub tag_name: String,
+    pub value: String,
+    pub published_at: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -263,18 +281,49 @@ pub async fn get_release_version(args: RepoArgs) -> Result<ReleaseVersion, Strin
     let repo = normalize_repo(&args.repo)?;
     let client = build_http_client()?;
     let release = fetch_github_latest_release(&client, &repo).await?;
-    let value = if release.name.trim().is_empty() {
-        release.tag_name.trim().to_string()
-    } else {
-        release.name.trim().to_string()
-    };
-    if value.is_empty() {
-        return Err("release_metadata_missing_version".into());
-    }
+    let value = release_display_value(&repo, &release)?;
     Ok(ReleaseVersion {
         value,
         published_at: release.published_at,
     })
+}
+
+#[tauri::command]
+pub async fn get_release_details(args: RepoReleaseArgs) -> Result<ReleaseDetails, String> {
+    let repo = normalize_repo(&args.repo)?;
+    let client = build_http_client()?;
+    let release = match args.tags {
+        Some(tags) if !tags.is_empty() => fetch_github_release_by_tags(&client, &repo, &tags).await?,
+        _ => fetch_github_latest_release(&client, &repo).await?,
+    };
+    let value = release_display_value(&repo, &release)?;
+
+    Ok(ReleaseDetails {
+        tag_name: release.tag_name,
+        value,
+        published_at: release.published_at,
+        notes: release.body,
+    })
+}
+
+#[tauri::command]
+pub async fn get_release_history(args: RepoArgs) -> Result<Vec<ReleaseDetails>, String> {
+    let repo = normalize_repo(&args.repo)?;
+    let client = build_http_client()?;
+    let releases = fetch_github_release_history(&client, &repo).await?;
+
+    releases
+        .into_iter()
+        .map(|release| {
+            let value = release_display_value(&repo, &release)?;
+            Ok(ReleaseDetails {
+                tag_name: release.tag_name,
+                value,
+                published_at: release.published_at,
+                notes: release.body,
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -528,16 +577,58 @@ fn github_latest_release_api_url(repo: &str) -> String {
     format!("https://api.github.com/repos/{repo}/releases/latest")
 }
 
+fn github_release_history_api_url(repo: &str, page: usize) -> String {
+    format!(
+        "https://api.github.com/repos/{repo}/releases?per_page={GITHUB_RELEASES_PAGE_SIZE}&page={page}"
+    )
+}
+
+fn github_release_by_tag_api_url(repo: &str, tag: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/tags/{tag}")
+}
+
 async fn fetch_github_latest_release(
     client: &reqwest::Client,
     repo: &str,
 ) -> Result<GitHubRelease, String> {
     let release_url = github_latest_release_api_url(repo);
+    fetch_github_release(client, &release_url).await
+}
+
+async fn fetch_github_release_by_tags(
+    client: &reqwest::Client,
+    repo: &str,
+    tags: &[String],
+) -> Result<GitHubRelease, String> {
+    for raw_tag in tags {
+        let tag = raw_tag.trim();
+        if tag.is_empty() {
+            continue;
+        }
+
+        let release_url = github_release_by_tag_api_url(repo, tag);
+        match fetch_github_release(client, &release_url).await {
+            Ok(release) => return Ok(release),
+            Err(err) if err == "release_tag_not_found" => continue,
+            Err(err) => return Err(err),
+        }
+    }
+
+    Err("release_tag_not_found".into())
+}
+
+async fn fetch_github_release(
+    client: &reqwest::Client,
+    release_url: &str,
+) -> Result<GitHubRelease, String> {
     let response = client
-        .get(&release_url)
+        .get(release_url)
         .send()
         .await
         .map_err(classify_request_error)?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err("release_tag_not_found".into());
+    }
     classify_status(response.status())?;
     let release_bytes = response
         .bytes()
@@ -546,6 +637,62 @@ async fn fetch_github_latest_release(
         .to_vec();
     serde_json::from_slice(&release_bytes)
         .map_err(|e| format!("release_metadata_invalid_json: {e}"))
+}
+
+async fn fetch_github_release_history(
+    client: &reqwest::Client,
+    repo: &str,
+) -> Result<Vec<GitHubRelease>, String> {
+    let mut page = 1usize;
+    let mut releases = Vec::new();
+
+    loop {
+        let release_url = github_release_history_api_url(repo, page);
+        let response = client
+            .get(&release_url)
+            .send()
+            .await
+            .map_err(classify_request_error)?;
+        classify_status(response.status())?;
+        let release_bytes = response
+            .bytes()
+            .await
+            .map_err(classify_request_error)?
+            .to_vec();
+        let mut page_releases: Vec<GitHubRelease> = serde_json::from_slice(&release_bytes)
+            .map_err(|e| format!("release_metadata_invalid_json: {e}"))?;
+        if page_releases.is_empty() {
+            break;
+        }
+
+        let fetched_count = page_releases.len();
+        releases.append(&mut page_releases);
+        if fetched_count < GITHUB_RELEASES_PAGE_SIZE {
+            break;
+        }
+
+        page += 1;
+    }
+
+    Ok(releases)
+}
+
+fn release_display_value(repo: &str, release: &GitHubRelease) -> Result<String, String> {
+    let raw_value = if release.name.trim().is_empty() {
+        release.tag_name.trim().to_string()
+    } else {
+        release.name.trim().to_string()
+    };
+    let value = if repo == "SubRosaCustom/launcher" {
+        raw_value.replace("SRC Launcher", "").trim().to_string()
+    } else {
+        raw_value
+    };
+    if value.is_empty() {
+        return Err("release_metadata_missing_version".into());
+    }
+
+    Ok(value)
 }
 
 fn normalize_repo(repo: &str) -> Result<String, String> {
