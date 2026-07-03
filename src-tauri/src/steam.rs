@@ -4,7 +4,7 @@ use steamlocate::SteamDir;
 
 const SUB_ROSA_APP_ID: u32 = 272_230;
 #[cfg(target_os = "windows")]
-const WINDOWS_EXECUTABLES: [&str; 4] = ["subrosa.exe", "subrosa.x64.exe", "subrosa.x64", "subrosa"];
+const WINDOWS_EXECUTABLES: [&str; 3] = ["subrosa.x64", "subrosa.exe", "subrosa"];
 #[cfg(not(target_os = "windows"))]
 const POSIX_EXECUTABLES: [&str; 2] = ["subrosa.x64", "subrosa"];
 

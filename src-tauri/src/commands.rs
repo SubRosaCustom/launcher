@@ -26,6 +26,7 @@ const MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 const RETRY_DELAYS_MS: [u64; 2] = [250, 750];
 const CONNECT_TIMEOUT_SECS: u64 = 8;
 const REQUEST_TIMEOUT_SECS: u64 = 30;
+const GITHUB_RELEASES_PAGE_SIZE: usize = 100;
 const CLIENT_DOWNLOAD_PROGRESS_EVENT: &str = "client-download-progress";
 const LAUNCHER_UPDATE_PROGRESS_EVENT: &str = "launcher-update-progress";
 
@@ -57,7 +58,14 @@ pub struct RepoArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DiagnosticsArgs {
+pub struct RepoReleaseArgs {
+    pub repo: String,
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoDiagnosticsArgs {
     pub repo: Option<String>,
 }
 
@@ -66,6 +74,7 @@ struct GitHubRelease {
     tag_name: String,
     name: String,
     published_at: Option<String>,
+    body: Option<String>,
     assets: Vec<GitHubReleaseAsset>,
 }
 
@@ -80,6 +89,15 @@ struct GitHubReleaseAsset {
 pub struct ReleaseVersion {
     pub value: String,
     pub published_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseDetails {
+    pub tag_name: String,
+    pub value: String,
+    pub published_at: Option<String>,
+    pub notes: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -121,8 +139,18 @@ pub fn append_launcher_log(app: AppHandle, message: String) -> Result<(), String
 }
 
 #[tauri::command]
-pub fn open_logs(app: AppHandle) -> Result<String, String> {
-    support::open_logs(&app)
+pub fn open_launcher_logs(app: AppHandle) -> Result<String, String> {
+    support::open_launcher_logs(&app)
+}
+
+#[tauri::command]
+pub fn open_client_crashlogs_folder() -> Result<String, String> {
+    support::open_client_crashlogs_folder()
+}
+
+#[tauri::command]
+pub fn open_client_config_folder() -> Result<String, String> {
+    support::open_client_config_folder()
 }
 
 #[tauri::command]
@@ -142,9 +170,17 @@ pub fn clear_cache(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn collect_diagnostics(app: AppHandle, args: DiagnosticsArgs) -> Result<String, String> {
+pub fn collect_launcher_diagnostics(
+    app: AppHandle,
+    args: RepoDiagnosticsArgs,
+) -> Result<String, String> {
     let repo = args.repo.as_deref().map(normalize_repo).transpose()?;
-    support::collect_diagnostics(&app, repo.as_deref())
+    support::collect_launcher_diagnostics(&app, repo.as_deref())
+}
+
+#[tauri::command]
+pub fn collect_client_diagnostics() -> Result<String, String> {
+    support::collect_client_diagnostics()
 }
 
 #[tauri::command]
@@ -213,9 +249,8 @@ pub async fn install_launcher_update(app: AppHandle) -> Result<(), String> {
     update
         .download_and_install(
             |chunk_length, content_length| {
-                let current =
-                    on_chunk_downloaded.fetch_add(chunk_length as u64, Ordering::Relaxed)
-                        + chunk_length as u64;
+                let current = on_chunk_downloaded.fetch_add(chunk_length as u64, Ordering::Relaxed)
+                    + chunk_length as u64;
                 emit_transfer_progress(
                     &app,
                     LAUNCHER_UPDATE_PROGRESS_EVENT,
@@ -246,18 +281,51 @@ pub async fn get_release_version(args: RepoArgs) -> Result<ReleaseVersion, Strin
     let repo = normalize_repo(&args.repo)?;
     let client = build_http_client()?;
     let release = fetch_github_latest_release(&client, &repo).await?;
-    let value = if release.name.trim().is_empty() {
-        release.tag_name.trim().to_string()
-    } else {
-        release.name.trim().to_string()
-    };
-    if value.is_empty() {
-        return Err("release_metadata_missing_version".into());
-    }
+    let value = release_display_value(&repo, &release)?;
     Ok(ReleaseVersion {
         value,
         published_at: release.published_at,
     })
+}
+
+#[tauri::command]
+pub async fn get_release_details(args: RepoReleaseArgs) -> Result<ReleaseDetails, String> {
+    let repo = normalize_repo(&args.repo)?;
+    let client = build_http_client()?;
+    let release = match args.tags {
+        Some(tags) if !tags.is_empty() => {
+            fetch_github_release_by_tags(&client, &repo, &tags).await?
+        }
+        _ => fetch_github_latest_release(&client, &repo).await?,
+    };
+    let value = release_display_value(&repo, &release)?;
+
+    Ok(ReleaseDetails {
+        tag_name: release.tag_name,
+        value,
+        published_at: release.published_at,
+        notes: release.body,
+    })
+}
+
+#[tauri::command]
+pub async fn get_release_history(args: RepoArgs) -> Result<Vec<ReleaseDetails>, String> {
+    let repo = normalize_repo(&args.repo)?;
+    let client = build_http_client()?;
+    let releases = fetch_github_release_history(&client, &repo).await?;
+
+    releases
+        .into_iter()
+        .map(|release| {
+            let value = release_display_value(&repo, &release)?;
+            Ok(ReleaseDetails {
+                tag_name: release.tag_name,
+                value,
+                published_at: release.published_at,
+                notes: release.body,
+            })
+        })
+        .collect()
 }
 
 #[tauri::command]
@@ -281,12 +349,13 @@ pub async fn download_injection_library(
         .find(|asset| asset.name == library_name)
         .map(|asset| asset.browser_download_url.clone())
         .ok_or_else(|| {
-            format!(
-                "release_asset_missing: repo={repo} release=latest asset={library_name}"
-            )
+            format!("release_asset_missing: repo={repo} release=latest asset={library_name}")
         })?;
 
-    let cache_dir = support::repo_cache_dir(&app, &repo)?;
+    let cache_dir =
+        support::repo_cache_dir(&app, &repo)?.join(support::sanitize_path_part(&release.tag_name));
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| format!("io_error: cannot create release cache dir: {e}"))?;
     let cached_artifact_path = cache_dir.join(library_name);
     if cached_artifact_path.exists() {
         return Ok(cached_artifact_path.to_string_lossy().into_owned());
@@ -317,18 +386,25 @@ pub fn launch_game(args: LaunchGameArgs) -> Result<(), String> {
     ensure_supported_platform()?;
     let executable_path = resolve_executable_path(&args);
     ensure_executable_exists(&executable_path)?;
+    let working_dir = resolve_working_dir(&args.game_dir, &executable_path)?;
     let inject_library_path =
         validate_injection_library_path(args.inject_library_path.as_deref())?.map(str::to_owned);
 
     launch_game_for_platform(
         &executable_path,
-        &args.game_dir,
+        &working_dir,
         inject_library_path.as_deref(),
     )
 }
 
 fn resolve_executable_path(args: &LaunchGameArgs) -> PathBuf {
-    let exe = PathBuf::from(&args.game_dir).join(&args.executable_name);
+    let executable_name = args.executable_name.trim();
+    let executable_path = PathBuf::from(executable_name);
+    if executable_path.is_absolute() {
+        return executable_path;
+    }
+
+    let exe = PathBuf::from(args.game_dir.trim()).join(executable_name);
     #[cfg(target_os = "windows")]
     {
         if exe.exists() {
@@ -347,6 +423,18 @@ fn resolve_executable_path(args: &LaunchGameArgs) -> PathBuf {
     {
         exe
     }
+}
+
+fn resolve_working_dir(game_dir: &str, executable_path: &Path) -> Result<PathBuf, String> {
+    let game_dir = game_dir.trim();
+    if !game_dir.is_empty() {
+        return Ok(PathBuf::from(game_dir));
+    }
+
+    executable_path
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "game path is missing".to_string())
 }
 
 fn build_http_client() -> Result<reqwest::Client, String> {
@@ -510,16 +598,58 @@ fn github_latest_release_api_url(repo: &str) -> String {
     format!("https://api.github.com/repos/{repo}/releases/latest")
 }
 
+fn github_release_history_api_url(repo: &str, page: usize) -> String {
+    format!(
+        "https://api.github.com/repos/{repo}/releases?per_page={GITHUB_RELEASES_PAGE_SIZE}&page={page}"
+    )
+}
+
+fn github_release_by_tag_api_url(repo: &str, tag: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/tags/{tag}")
+}
+
 async fn fetch_github_latest_release(
     client: &reqwest::Client,
     repo: &str,
 ) -> Result<GitHubRelease, String> {
     let release_url = github_latest_release_api_url(repo);
+    fetch_github_release(client, &release_url).await
+}
+
+async fn fetch_github_release_by_tags(
+    client: &reqwest::Client,
+    repo: &str,
+    tags: &[String],
+) -> Result<GitHubRelease, String> {
+    for raw_tag in tags {
+        let tag = raw_tag.trim();
+        if tag.is_empty() {
+            continue;
+        }
+
+        let release_url = github_release_by_tag_api_url(repo, tag);
+        match fetch_github_release(client, &release_url).await {
+            Ok(release) => return Ok(release),
+            Err(err) if err == "release_tag_not_found" => continue,
+            Err(err) => return Err(err),
+        }
+    }
+
+    Err("release_tag_not_found".into())
+}
+
+async fn fetch_github_release(
+    client: &reqwest::Client,
+    release_url: &str,
+) -> Result<GitHubRelease, String> {
     let response = client
-        .get(&release_url)
+        .get(release_url)
         .send()
         .await
         .map_err(classify_request_error)?;
+    if response.status() == StatusCode::NOT_FOUND {
+        return Err("release_tag_not_found".into());
+    }
     classify_status(response.status())?;
     let release_bytes = response
         .bytes()
@@ -528,6 +658,62 @@ async fn fetch_github_latest_release(
         .to_vec();
     serde_json::from_slice(&release_bytes)
         .map_err(|e| format!("release_metadata_invalid_json: {e}"))
+}
+
+async fn fetch_github_release_history(
+    client: &reqwest::Client,
+    repo: &str,
+) -> Result<Vec<GitHubRelease>, String> {
+    let mut page = 1usize;
+    let mut releases = Vec::new();
+
+    loop {
+        let release_url = github_release_history_api_url(repo, page);
+        let response = client
+            .get(&release_url)
+            .send()
+            .await
+            .map_err(classify_request_error)?;
+        classify_status(response.status())?;
+        let release_bytes = response
+            .bytes()
+            .await
+            .map_err(classify_request_error)?
+            .to_vec();
+        let mut page_releases: Vec<GitHubRelease> = serde_json::from_slice(&release_bytes)
+            .map_err(|e| format!("release_metadata_invalid_json: {e}"))?;
+        if page_releases.is_empty() {
+            break;
+        }
+
+        let fetched_count = page_releases.len();
+        releases.append(&mut page_releases);
+        if fetched_count < GITHUB_RELEASES_PAGE_SIZE {
+            break;
+        }
+
+        page += 1;
+    }
+
+    Ok(releases)
+}
+
+fn release_display_value(repo: &str, release: &GitHubRelease) -> Result<String, String> {
+    let raw_value = if release.name.trim().is_empty() {
+        release.tag_name.trim().to_string()
+    } else {
+        release.name.trim().to_string()
+    };
+    let value = if repo == "SubRosaCustom/launcher" {
+        raw_value.replace("SRC Launcher", "").trim().to_string()
+    } else {
+        raw_value
+    };
+    if value.is_empty() {
+        return Err("release_metadata_missing_version".into());
+    }
+
+    Ok(value)
 }
 
 fn normalize_repo(repo: &str) -> Result<String, String> {
@@ -600,7 +786,7 @@ fn ensure_supported_platform() -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn launch_game_for_platform(
     executable_path: &Path,
-    game_dir: &str,
+    game_dir: &Path,
     inject_library_path: Option<&str>,
 ) -> Result<(), String> {
     if let Some(inject_library_path) = inject_library_path {
@@ -613,7 +799,7 @@ fn launch_game_for_platform(
 #[cfg(target_os = "linux")]
 fn launch_game_for_platform(
     executable_path: &Path,
-    game_dir: &str,
+    game_dir: &Path,
     inject_library_path: Option<&str>,
 ) -> Result<(), String> {
     launch_game_process(executable_path, game_dir, inject_library_path)
@@ -622,7 +808,7 @@ fn launch_game_for_platform(
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn launch_game_for_platform(
     executable_path: &Path,
-    game_dir: &str,
+    game_dir: &Path,
     _inject_library_path: Option<&str>,
 ) -> Result<(), String> {
     launch_game_process(executable_path, game_dir, None)
@@ -630,7 +816,7 @@ fn launch_game_for_platform(
 
 fn launch_game_process(
     executable_path: &Path,
-    game_dir: &str,
+    game_dir: &Path,
     preload_library_path: Option<&str>,
 ) -> Result<(), String> {
     let mut game_process = Command::new(executable_path);
@@ -649,7 +835,7 @@ fn launch_game_process(
 }
 
 #[cfg(target_os = "windows")]
-fn launch_game_windows(exe: &Path, game_dir: &str, lib: &str) -> Result<(), String> {
+fn launch_game_windows(exe: &Path, game_dir: &Path, lib: &str) -> Result<(), String> {
     use std::{
         mem::zeroed,
         ptr::{null, null_mut},
@@ -663,7 +849,7 @@ fn launch_game_windows(exe: &Path, game_dir: &str, lib: &str) -> Result<(), Stri
     };
 
     let exe_w = to_wide(exe.as_os_str().to_string_lossy().as_ref());
-    let dir_w = to_wide(game_dir);
+    let dir_w = to_wide(game_dir.as_os_str().to_string_lossy().as_ref());
     let mut si: STARTUPINFOW = unsafe { zeroed() };
     si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
     let mut pi: PROCESS_INFORMATION = unsafe { zeroed() };
@@ -761,6 +947,30 @@ mod tests {
         assert_eq!(platform_library_name(), "libsrcustom.so");
     }
 
+    #[test]
+    fn absolute_executable_path_is_used_directly() {
+        let executable_path = absolute_test_path("custom-subrosa", "subrosa.x64");
+        let args = LaunchGameArgs {
+            game_dir: "/steam/Sub Rosa".into(),
+            executable_name: executable_path.to_string_lossy().into_owned(),
+            inject_library_path: None,
+        };
+
+        assert_eq!(resolve_executable_path(&args), executable_path);
+    }
+
+    #[test]
+    fn empty_game_dir_uses_absolute_executable_parent_as_working_dir() {
+        let executable_path = absolute_test_path("custom-subrosa", "subrosa.x64");
+
+        assert_eq!(
+            resolve_working_dir("", &executable_path).expect("parent should be usable"),
+            executable_path
+                .parent()
+                .expect("test path should have parent")
+        );
+    }
+
     #[tokio::test]
     async fn download_file_writes_expected_content() {
         let server = MockServer::start().await;
@@ -791,5 +1001,16 @@ mod tests {
         assert!(!caps.contains("opener:default"));
         assert!(!caps.contains("process:default"));
         assert!(!caps.contains("updater:default"));
+    }
+
+    fn absolute_test_path(dir: &str, file_name: &str) -> PathBuf {
+        #[cfg(target_os = "windows")]
+        {
+            PathBuf::from(format!(r"C:\{dir}\{file_name}"))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            PathBuf::from(format!("/{dir}/{file_name}"))
+        }
     }
 }

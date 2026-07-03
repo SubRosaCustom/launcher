@@ -1,24 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import logoImage from './assets/logo.png';
 import './App.css';
 import SettingsPanel from './components/SettingsPanel';
 import {
   appendLauncherLog,
   clearCache,
-  collectDiagnostics,
+  collectClientDiagnostics,
+  collectLauncherDiagnostics,
   copyTextToClipboard,
   detectSubrosa,
   downloadInjectionLibrary,
   forceRedownload,
+  getReleaseHistory,
   getLauncherUpdateState,
-  getReleaseVersion,
   installLauncherUpdate,
   launchGame,
   loadSettings,
   openCacheFolder,
-  openLogs,
+  openClientConfigFolder,
+  openClientCrashlogsFolder,
+  openLauncherLogs,
   saveSettings,
 } from './api/launcher';
 import type {
@@ -27,12 +32,14 @@ import type {
   LibraryDownloadRequest,
   LauncherSettings,
   Phase,
+  ReleaseDetails,
 } from './types/launcher';
 
 const GH_REPO = 'SubRosaCustom/client_releases';
+const LAUNCHER_REPO = 'SubRosaCustom/launcher';
 const isWin = navigator.userAgent.includes('Windows');
 const isLinux = navigator.userAgent.includes('Linux');
-const defaultExecutableName = isWin ? 'subrosa.x64.exe' : 'subrosa.x64';
+const defaultExecutableName = 'subrosa.x64';
 
 const phaseLabels: Record<Phase, string> = {
   idle: 'Launch',
@@ -48,6 +55,7 @@ const configuredLibraryRequest: LibraryDownloadRequest = {
 const CLIENT_DOWNLOAD_PROGRESS_EVENT = 'client-download-progress';
 const LAUNCHER_UPDATE_PROGRESS_EVENT = 'launcher-update-progress';
 const PROGRESS_BAR_WIDTH = 20;
+const CHANGELOG_PAGE_SIZE = 8;
 
 interface LogEntry {
   id: number;
@@ -61,16 +69,12 @@ interface TransferProgressPayload {
   done: boolean;
 }
 
-function formatLauncherNotes(notes: string | null) {
+function getMarkdownContent(notes: string | null) {
   if (!notes || !notes.trim()) {
-    return ['No changelog available for this launcher update.'];
+    return 'No changelog available.';
   }
 
-  return notes
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .slice(0, 12);
+  return notes;
 }
 
 function formatBytes(value: number) {
@@ -88,15 +92,78 @@ function formatProgressBar(label: string, payload: TransferProgressPayload) {
   return `${label} [${bar}] ${percent}% (${formatBytes(payload.downloaded)}/${formatBytes(total)})`;
 }
 
+function getLauncherReleaseTags(version: string) {
+  const trimmed = version.trim();
+  if (!trimmed || trimmed === 'unknown') {
+    return [];
+  }
+
+  return [`launcher-v${trimmed}`, trimmed, `v${trimmed}`];
+}
+
+interface ChangelogModalState {
+  title: string;
+  releases: ReleaseDetails[];
+  selectedTagName: string | null;
+  fallbackVersion: string;
+}
+
+function findReleaseByTags(releases: ReleaseDetails[], tags: string[]) {
+  for (const tag of tags) {
+    const match = releases.find((release) => release.tagName === tag);
+    if (match) {
+      return match;
+    }
+  }
+
+  return releases[0] ?? null;
+}
+
+function formatPublishedAt(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
+}
+
+function isAbsolutePath(path: string) {
+  const value = path.trim();
+  return value.startsWith('/') || value.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function applyDetectedExecutable(settings: LauncherSettings, detection: DetectionResult) {
+  if (settings.executableName !== defaultExecutableName || detection.executableCandidates.length === 0) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    executableName: detection.executableCandidates[0],
+  };
+}
+
 function App() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [settings, setSettings] = useState<LauncherSettings>({
     executableName: defaultExecutableName,
+    customGameDir: null,
     closeOnLaunch: false,
   });
   const [detection, setDetection] = useState<DetectionResult | null>(null);
   const [releaseVersion, setReleaseVersion] = useState('Unknown');
+  const [clientReleaseHistory, setClientReleaseHistory] = useState<ReleaseDetails[]>([]);
+  const [launcherReleaseHistory, setLauncherReleaseHistory] = useState<ReleaseDetails[]>([]);
   const [launcherUpdate, setLauncherUpdate] = useState<LauncherUpdateState>({
     enabled: false,
     currentVersion: 'unknown',
@@ -110,6 +177,8 @@ function App() {
   const [isInstallingLauncherUpdate, setIsInstallingLauncherUpdate] = useState(false);
   const nextLogId = useRef(1);
   const [showLauncherUpdatePrompt, setShowLauncherUpdatePrompt] = useState(false);
+  const [changelogModal, setChangelogModal] = useState<ChangelogModalState | null>(null);
+  const [changelogPage, setChangelogPage] = useState(0);
 
   const appendLog = (message: string) => {
     setLogs((currentLogs) => [...currentLogs, { id: nextLogId.current++, message }]);
@@ -160,10 +229,14 @@ function App() {
 
     const initialize = async () => {
       try {
-        const [loadedSettings, detectedGame, release, launcherState] = await Promise.all([
+        const [loadedSettings, detectedGame, clientHistory, launcherState, launcherHistory] =
+          await Promise.all([
           loadSettings(),
           detectSubrosa(),
-          getReleaseVersion(configuredLibraryRequest.repo),
+          getReleaseHistory(configuredLibraryRequest.repo).catch((error) => {
+            appendLog(`Client changelog lookup failed: ${String(error)}`);
+            return [];
+          }),
           getLauncherUpdateState().catch((error) => {
             appendLog(`Launcher update check failed: ${String(error)}`);
             return {
@@ -174,13 +247,19 @@ function App() {
               notes: null,
             } satisfies LauncherUpdateState;
           }),
+          getReleaseHistory(LAUNCHER_REPO).catch((error) => {
+            appendLog(`Launcher changelog lookup failed: ${String(error)}`);
+            return [];
+          }),
         ]);
         if (cancelled) return;
 
-        setSettings(loadedSettings);
+        setSettings(applyDetectedExecutable(loadedSettings, detectedGame));
         setDetection(detectedGame);
-        setReleaseVersion(release.value);
+        setClientReleaseHistory(clientHistory);
+        setLauncherReleaseHistory(launcherHistory);
         setLauncherUpdate(launcherState);
+        setReleaseVersion(clientHistory[0]?.value ?? 'Unknown');
         appendLog(
           detectedGame.gameDir
             ? `Sub Rosa found: ${detectedGame.gameDir}`
@@ -227,8 +306,8 @@ function App() {
 
   const handleLaunch = async () => {
     if (phase !== 'idle') return;
-    const gameDir = detection?.gameDir;
-    if (!gameDir) {
+    const gameDir = settings.customGameDir?.trim() || detection?.gameDir || '';
+    if (!gameDir && !isAbsolutePath(settings.executableName)) {
       appendLog('Cannot launch: game path is missing.');
       return;
     }
@@ -286,7 +365,7 @@ function App() {
     try {
       await saveSettings(nextSettings);
       setSettings(nextSettings);
-      appendLog(`Saved executable override: ${nextSettings.executableName}`);
+      appendLog(`Saved launch overrides: ${nextSettings.customGameDir || 'auto'} / ${nextSettings.executableName}`);
       setIsSettingsOpen(false);
     } catch (e) {
       appendLog(`Save failed: ${String(e)}`);
@@ -295,10 +374,30 @@ function App() {
     }
   };
 
-  const handleOpenLogs = () =>
-    void runSupportAction('openLogs', async () => {
-      const path = await openLogs();
-      appendLog(`Opened logs: ${path}`);
+  const copySupportText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      await copyTextToClipboard(text);
+    }
+  };
+
+  const handleOpenLauncherLogs = () =>
+    void runSupportAction('openLauncherLogs', async () => {
+      const path = await openLauncherLogs();
+      appendLog(`Opened launcher logs: ${path}`);
+    });
+
+  const handleOpenClientCrashlogsFolder = () =>
+    void runSupportAction('openClientCrashlogsFolder', async () => {
+      const path = await openClientCrashlogsFolder();
+      appendLog(`Opened client crashlogs: ${path}`);
+    });
+
+  const handleOpenClientConfigFolder = () =>
+    void runSupportAction('openClientConfigFolder', async () => {
+      const path = await openClientConfigFolder();
+      appendLog(`Opened client config folder: ${path}`);
     });
 
   const handleOpenCacheFolder = () =>
@@ -319,17 +418,18 @@ function App() {
       appendLog(`Cleared launcher cache: ${path}`);
     });
 
-  const handleCopyDiagnostics = () =>
-    void runSupportAction('copyDiagnostics', async () => {
-      const diagnostics = await collectDiagnostics(configuredLibraryRequest.repo);
+  const handleCopyLauncherDiagnostics = () =>
+    void runSupportAction('copyLauncherDiagnostics', async () => {
+      const diagnostics = await collectLauncherDiagnostics(configuredLibraryRequest.repo);
+      await copySupportText(diagnostics);
+      appendLog('Launcher diagnostics copied to clipboard.');
+    });
 
-      try {
-        await navigator.clipboard.writeText(diagnostics);
-      } catch {
-        await copyTextToClipboard(diagnostics);
-      }
-
-      appendLog('Diagnostics copied to clipboard.');
+  const handleCopyClientDiagnostics = () =>
+    void runSupportAction('copyClientDiagnostics', async () => {
+      const diagnostics = await collectClientDiagnostics();
+      await copySupportText(diagnostics);
+      appendLog('Client diagnostics copied to clipboard.');
     });
 
   const handleInstallLauncherUpdate = async () => {
@@ -353,6 +453,51 @@ function App() {
     appendLog(`Skipped launcher update: ${launcherUpdate.version}`);
   };
 
+  const openClientChangelog = () => {
+    const selectedRelease = clientReleaseHistory[0] ?? null;
+    setChangelogModal({
+      title: 'Client changelog',
+      releases: clientReleaseHistory,
+      selectedTagName: selectedRelease?.tagName ?? null,
+      fallbackVersion: releaseVersion,
+    });
+    setChangelogPage(0);
+  };
+
+  const openLauncherChangelog = () => {
+    const selectedRelease = findReleaseByTags(
+      launcherReleaseHistory,
+      getLauncherReleaseTags(launcherUpdate.currentVersion),
+    );
+    const selectedIndex =
+      selectedRelease == null
+        ? 0
+        : launcherReleaseHistory.findIndex((release) => release.tagName === selectedRelease.tagName);
+    setChangelogModal({
+      title: 'Launcher changelog',
+      releases: launcherReleaseHistory,
+      selectedTagName: selectedRelease?.tagName ?? null,
+      fallbackVersion: launcherUpdate.currentVersion,
+    });
+    setChangelogPage(selectedIndex < 0 ? 0 : Math.floor(selectedIndex / CHANGELOG_PAGE_SIZE));
+  };
+
+  const selectedRelease =
+    changelogModal == null
+      ? null
+      : changelogModal.releases.find((release) => release.tagName === changelogModal.selectedTagName) ??
+        changelogModal.releases[0] ??
+        null;
+  const changelogPageCount =
+    changelogModal == null ? 1 : Math.max(1, Math.ceil(changelogModal.releases.length / CHANGELOG_PAGE_SIZE));
+  const visibleReleases =
+    changelogModal == null
+      ? []
+      : changelogModal.releases.slice(
+          changelogPage * CHANGELOG_PAGE_SIZE,
+          changelogPage * CHANGELOG_PAGE_SIZE + CHANGELOG_PAGE_SIZE,
+        );
+
   return (
     <main className="viewport">
       <div className="noise-overlay" />
@@ -360,8 +505,22 @@ function App() {
       <div className="launcher-shell">
         <img src={logoImage} alt="Sub Rosa logo" className="logo" />
         <div className="release-info">
-          <p className="version-label">launcher: {launcherUpdate.currentVersion}</p>
-          <p className="version-label">client: {releaseVersion}</p>
+          <button
+            className="version-label version-button"
+            onClick={openLauncherChangelog}
+            title="Click to see changelogs"
+            type="button"
+          >
+            launcher: {launcherUpdate.currentVersion}
+          </button>
+          <button
+            className="version-label version-button"
+            onClick={openClientChangelog}
+            title="Click to see changelogs"
+            type="button"
+          >
+            client: {releaseVersion}
+          </button>
         </div>
         <button
           className={`action-btn ${phase !== 'idle' ? 'is-processing' : ''}`}
@@ -396,14 +555,18 @@ function App() {
         saving={isSavingSettings}
         activeSupportAction={activeSupportAction}
         settings={settings}
+        detectedGameDir={detection?.gameDir ?? null}
         executableCandidates={detection?.executableCandidates ?? []}
         onSave={handleSettingsSave}
         onClose={() => setIsSettingsOpen(false)}
-        onOpenLogs={handleOpenLogs}
+        onOpenLauncherLogs={handleOpenLauncherLogs}
+        onOpenClientCrashlogsFolder={handleOpenClientCrashlogsFolder}
+        onOpenClientConfigFolder={handleOpenClientConfigFolder}
         onOpenCacheFolder={handleOpenCacheFolder}
         onForceRedownload={handleForceRedownload}
         onClearCache={handleClearCache}
-        onCopyDiagnostics={handleCopyDiagnostics}
+        onCopyLauncherDiagnostics={handleCopyLauncherDiagnostics}
+        onCopyClientDiagnostics={handleCopyClientDiagnostics}
       />
 
       {showLauncherUpdatePrompt ? (
@@ -412,11 +575,11 @@ function App() {
             <p className="update-modal-title">Launcher update available</p>
             <p className="hint">Install version {launcherUpdate.version}</p>
             <div className="update-notes">
-              {formatLauncherNotes(launcherUpdate.notes).map((line, index) => (
-                <p key={`${index}-${line}`} className="update-note-line">
-                  {line}
-                </p>
-              ))}
+              <div className="markdown-body">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {getMarkdownContent(launcherUpdate.notes)}
+                </ReactMarkdown>
+              </div>
             </div>
             <div className="update-modal-actions">
               <button className="action-btn" onClick={handleInstallLauncherUpdate}>
@@ -424,6 +587,94 @@ function App() {
               </button>
               <button className="action-btn" onClick={handleDismissLauncherUpdate}>
                 <span className="btn-label">Not Now</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {changelogModal ? (
+        <div className="update-modal-backdrop" onClick={() => setChangelogModal(null)}>
+          <div className="update-modal changelog-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="changelog-header">
+              <div className="changelog-header-copy">
+                <p className="update-modal-title">{changelogModal.title}</p>
+              </div>
+            </div>
+            <div className="changelog-layout">
+              <div className="changelog-sidebar">
+                <div className="changelog-sidebar-header">
+                  <span className="hint">
+                    Releases {changelogModal.releases.length > 0 ? changelogModal.releases.length : 0}
+                  </span>
+                  <span className="hint">
+                    Page {Math.min(changelogPage + 1, changelogPageCount)}/{changelogPageCount}
+                  </span>
+                </div>
+                <div className="changelog-release-list">
+                  {visibleReleases.length > 0 ? (
+                    visibleReleases.map((release) => (
+                      <button
+                        key={release.tagName}
+                        className={`changelog-release-button ${
+                          selectedRelease?.tagName === release.tagName ? 'is-selected' : ''
+                        }`}
+                        onClick={() =>
+                          setChangelogModal((current) =>
+                            current == null
+                              ? current
+                              : { ...current, selectedTagName: release.tagName },
+                          )
+                        }
+                        type="button"
+                      >
+                        <span className="changelog-release-version">
+                          {release.value}
+                          {release.tagName === changelogModal.releases[0]?.tagName ? (
+                            <span className="changelog-release-latest"> latest</span>
+                          ) : null}
+                        </span>
+                        <span className="changelog-release-date">
+                          {formatPublishedAt(release.publishedAt) ?? 'Undated'}
+                        </span>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="hint">No release history available.</p>
+                  )}
+                </div>
+                <div className="changelog-sidebar-actions">
+                  <button
+                    className="action-btn changelog-nav-btn"
+                    disabled={changelogPage === 0}
+                    onClick={() => setChangelogPage((current) => Math.max(0, current - 1))}
+                    type="button"
+                  >
+                    <span className="btn-label">Previous</span>
+                  </button>
+                  <button
+                    className="action-btn changelog-nav-btn"
+                    disabled={changelogPage >= changelogPageCount - 1}
+                    onClick={() =>
+                      setChangelogPage((current) => Math.min(changelogPageCount - 1, current + 1))
+                    }
+                    type="button"
+                  >
+                    <span className="btn-label">Next</span>
+                  </button>
+                </div>
+              </div>
+              <div className="changelog-content">
+                <div className="changelog-markdown">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {getMarkdownContent(selectedRelease?.notes ?? null)}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            </div>
+            <div className="update-modal-actions changelog-footer">
+              <button className="action-btn changelog-close-btn" onClick={() => setChangelogModal(null)} type="button">
+                <span className="btn-label">Close</span>
               </button>
             </div>
           </div>

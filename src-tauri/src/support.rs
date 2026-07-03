@@ -1,16 +1,21 @@
+use chrono::{DateTime, Utc};
 use std::{
-    fs,
+    env, fs,
     io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::SystemTime,
 };
-use chrono::{DateTime, Utc};
 use tauri::{AppHandle, Manager};
 
 use crate::{settings, steam};
 
 const LAUNCHER_LOG_FILE: &str = "launcher.log";
+const CLIENT_CONFIG_DIR_NAME: &str = "Sub Rosa Custom";
+const CLIENT_CRASHLOG_DIR_NAME: &str = "crashlogs";
+const CLIENT_LOCAL_RUNTIME_ROOT_NAME: &str = "subrosacustom";
+const CLIENT_SYNC_CACHE_ROOT_NAME: &str = "sync";
+const CLIENT_TEXTURE_EXPORTS_DIR_NAME: &str = "texture_exports";
 
 pub fn repo_cache_dir(app: &AppHandle, repo: &str) -> Result<PathBuf, String> {
     let cache_dir = cache_root_dir(app)?.join(sanitize_path_part(repo));
@@ -19,7 +24,7 @@ pub fn repo_cache_dir(app: &AppHandle, repo: &str) -> Result<PathBuf, String> {
     Ok(cache_dir)
 }
 
-pub fn open_logs(app: &AppHandle) -> Result<String, String> {
+pub fn open_launcher_logs(app: &AppHandle) -> Result<String, String> {
     let log_dir = ensure_log_dir(app)?;
     let log_file = log_dir.join(LAUNCHER_LOG_FILE);
     if !log_file.exists() {
@@ -27,6 +32,18 @@ pub fn open_logs(app: &AppHandle) -> Result<String, String> {
     }
     open_path_in_file_manager(&log_dir)?;
     Ok(log_dir.to_string_lossy().into_owned())
+}
+
+pub fn open_client_crashlogs_folder() -> Result<String, String> {
+    let crashlog_dir = ensure_client_crashlog_dir()?;
+    open_path_in_file_manager(&crashlog_dir)?;
+    Ok(crashlog_dir.to_string_lossy().into_owned())
+}
+
+pub fn open_client_config_folder() -> Result<String, String> {
+    let client_dir = ensure_client_config_dir()?;
+    open_path_in_file_manager(&client_dir)?;
+    Ok(client_dir.to_string_lossy().into_owned())
 }
 
 pub fn open_cache_folder(app: &AppHandle) -> Result<String, String> {
@@ -66,7 +83,7 @@ pub fn append_launcher_log(app: &AppHandle, message: &str) -> Result<(), String>
         .map_err(|e| format!("io_error: cannot write log file: {e}"))
 }
 
-pub fn collect_diagnostics(app: &AppHandle, repo: Option<&str>) -> Result<String, String> {
+pub fn collect_launcher_diagnostics(app: &AppHandle, repo: Option<&str>) -> Result<String, String> {
     let detection = steam::detect_subrosa();
     let settings_summary = match settings::load_settings(app) {
         Ok(settings) => format!(
@@ -125,6 +142,105 @@ pub fn collect_diagnostics(app: &AppHandle, repo: Option<&str>) -> Result<String
     Ok(diagnostics.join("\n"))
 }
 
+pub fn collect_client_diagnostics() -> Result<String, String> {
+    let config_root = client_config_dir()?;
+    let crashlog_root = config_root.join(CLIENT_CRASHLOG_DIR_NAME);
+    let local_runtime_root = config_root.join(CLIENT_LOCAL_RUNTIME_ROOT_NAME);
+    let local_scripts_root = local_runtime_root.join("scripts");
+    let sync_cache_root = config_root.join(CLIENT_SYNC_CACHE_ROOT_NAME);
+    let texture_exports_root = config_root.join(CLIENT_TEXTURE_EXPORTS_DIR_NAME);
+    let latest_crashlog = latest_file_in_dir(&crashlog_root)?;
+    let has_latest_crashlog = latest_crashlog.is_some();
+
+    let mut diagnostics = vec![
+        format!("timestamp={}", timestamp_rfc3339_now()),
+        format!("platform.os={}", std::env::consts::OS),
+        format!("platform.arch={}", std::env::consts::ARCH),
+        format!("client.configRoot={}", config_root.to_string_lossy()),
+        format!("client.configRoot.exists={}", config_root.exists()),
+        format!("client.crashlogRoot={}", crashlog_root.to_string_lossy()),
+        format!(
+            "client.crashlogRoot.summary={}",
+            summarize_dir(&crashlog_root)?
+        ),
+        "client.syncMode=in-memory scripts".to_string(),
+        format!(
+            "client.localRuntimeRoot={}",
+            local_runtime_root.to_string_lossy()
+        ),
+        format!(
+            "client.localRuntimeRoot.summary={}",
+            summarize_dir(&local_runtime_root)?
+        ),
+        format!(
+            "client.localScriptsRoot={}",
+            local_scripts_root.to_string_lossy()
+        ),
+        format!(
+            "client.localScriptsRoot.summary={}",
+            summarize_dir(&local_scripts_root)?
+        ),
+        format!("client.syncCacheRoot={}", sync_cache_root.to_string_lossy()),
+        format!(
+            "client.syncCacheRoot.summary={}",
+            summarize_dir(&sync_cache_root)?
+        ),
+        format!(
+            "client.textureExportsRoot={}",
+            texture_exports_root.to_string_lossy()
+        ),
+        format!(
+            "client.textureExportsRoot.summary={}",
+            summarize_dir(&texture_exports_root)?
+        ),
+    ];
+
+    match latest_crashlog {
+        Some(path) => {
+            let metadata = fs::metadata(&path).map_err(|e| {
+                format!(
+                    "io_error: cannot read crashlog metadata {}: {e}",
+                    path.display()
+                )
+            })?;
+            let modified = metadata.modified().map(timestamp_rfc3339).map_err(|e| {
+                format!(
+                    "io_error: cannot read crashlog modified time {}: {e}",
+                    path.display()
+                )
+            })?;
+            let crashlog_contents = read_text_file(&path)?;
+
+            diagnostics.push(format!("client.latestCrashlog={}", path.to_string_lossy()));
+            diagnostics.push(format!("client.latestCrashlog.bytes={}", metadata.len()));
+            diagnostics.push(format!("client.latestCrashlog.modified={modified}"));
+            diagnostics.push("client.latestCrashlog.begin".to_string());
+            if crashlog_contents.is_empty() {
+                diagnostics.push("(empty)".to_string());
+            } else {
+                diagnostics.extend(crashlog_contents.lines().map(ToString::to_string));
+            }
+            diagnostics.push("client.latestCrashlog.end".to_string());
+        }
+        None => {
+            diagnostics.push("client.latestCrashlog=missing".to_string());
+        }
+    }
+
+    let status = if has_latest_crashlog {
+        "client crash evidence found"
+    } else if sync_cache_root.exists() {
+        "client sync cache present"
+    } else if local_runtime_root.exists() {
+        "client local runtime present"
+    } else {
+        "no client evidence found"
+    };
+    diagnostics.push(format!("client.status={status}"));
+
+    Ok(diagnostics.join("\n"))
+}
+
 pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -159,6 +275,53 @@ pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
 
 fn launcher_log_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(ensure_log_dir(app)?.join(LAUNCHER_LOG_FILE))
+}
+
+fn client_config_dir() -> Result<PathBuf, String> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(path) = env::var_os("APPDATA") {
+            return Ok(PathBuf::from(path).join(CLIENT_CONFIG_DIR_NAME));
+        }
+
+        let home = env::var_os("USERPROFILE")
+            .ok_or_else(|| "path_error: cannot resolve USERPROFILE".to_string())?;
+        return Ok(PathBuf::from(home)
+            .join("AppData")
+            .join("Roaming")
+            .join(CLIENT_CONFIG_DIR_NAME));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
+            let config_home = PathBuf::from(path);
+            if !config_home.is_absolute() {
+                return Err("path_error: XDG_CONFIG_HOME must be absolute".to_string());
+            }
+            return Ok(config_home.join(CLIENT_CONFIG_DIR_NAME));
+        }
+
+        let home =
+            env::var_os("HOME").ok_or_else(|| "path_error: cannot resolve HOME".to_string())?;
+        Ok(PathBuf::from(home)
+            .join(".config")
+            .join(CLIENT_CONFIG_DIR_NAME))
+    }
+}
+
+fn ensure_client_config_dir() -> Result<PathBuf, String> {
+    let client_dir = client_config_dir()?;
+    fs::create_dir_all(&client_dir)
+        .map_err(|e| format!("io_error: cannot create client config dir: {e}"))?;
+    Ok(client_dir)
+}
+
+fn ensure_client_crashlog_dir() -> Result<PathBuf, String> {
+    let crashlog_dir = ensure_client_config_dir()?.join(CLIENT_CRASHLOG_DIR_NAME);
+    fs::create_dir_all(&crashlog_dir)
+        .map_err(|e| format!("io_error: cannot create client crashlog dir: {e}"))?;
+    Ok(crashlog_dir)
 }
 
 fn ensure_log_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -255,11 +418,57 @@ fn read_log_tail(path: &Path, max_lines: usize) -> Result<Vec<String>, String> {
     Ok(lines)
 }
 
+fn read_text_file(path: &Path) -> Result<String, String> {
+    if !path.exists() {
+        return Ok(String::new());
+    }
+
+    fs::read_to_string(path).map_err(|e| format!("io_error: cannot read log file: {e}"))
+}
+
+fn latest_file_in_dir(path: &Path) -> Result<Option<PathBuf>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let mut latest: Option<(SystemTime, PathBuf)> = None;
+    for entry in fs::read_dir(path)
+        .map_err(|e| format!("io_error: cannot read directory {}: {e}", path.display()))?
+    {
+        let entry = entry.map_err(|e| format!("io_error: cannot read directory entry: {e}"))?;
+        let entry_path = entry.path();
+        let metadata = entry.metadata().map_err(|e| {
+            format!(
+                "io_error: cannot read metadata {}: {e}",
+                entry_path.display()
+            )
+        })?;
+
+        if !metadata.is_file() {
+            continue;
+        }
+
+        let modified = metadata.modified().map_err(|e| {
+            format!(
+                "io_error: cannot read modified time {}: {e}",
+                entry_path.display()
+            )
+        })?;
+
+        match &latest {
+            Some((current, _)) if modified <= *current => {}
+            _ => latest = Some((modified, entry_path)),
+        }
+    }
+
+    Ok(latest.map(|(_, path)| path))
+}
+
 fn option_line(value: &Option<String>) -> &str {
     value.as_deref().unwrap_or("missing")
 }
 
-fn sanitize_path_part(value: &str) -> String {
+pub fn sanitize_path_part(value: &str) -> String {
     value
         .chars()
         .map(|ch| {
@@ -325,6 +534,10 @@ fn run_copy_command(program: &str, args: &[&str], text: &str) -> Result<(), Stri
 }
 
 fn timestamp_rfc3339_now() -> String {
-    let timestamp: DateTime<Utc> = SystemTime::now().into();
+    timestamp_rfc3339(SystemTime::now())
+}
+
+fn timestamp_rfc3339(time: SystemTime) -> String {
+    let timestamp: DateTime<Utc> = time.into();
     timestamp.to_rfc3339()
 }
