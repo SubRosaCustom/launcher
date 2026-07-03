@@ -544,12 +544,14 @@ button {
 .settings-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
   width: 100%;
 }
 
 .settings-row input {
-  width: min(700px, calc(100vw - 240px));
+  flex: 1 1 420px;
+  min-width: 0;
   padding: 10px 12px;
   border: 0px;
   background: rgb(48, 48, 48);
@@ -627,6 +629,13 @@ button {
   padding: 0 16px;
 }
 
+.path-picker-btn {
+  width: auto;
+  min-width: 92px;
+  height: 42px;
+  padding: 0 12px;
+}
+
 .settings-back-btn,
 .settings-save-btn {
   width: auto;
@@ -653,7 +662,7 @@ button {
   }
 
   .settings-row input {
-    width: 100%;
+    flex-basis: 100%;
   }
 
   .toggle-btn {

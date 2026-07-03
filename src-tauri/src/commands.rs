@@ -293,7 +293,9 @@ pub async fn get_release_details(args: RepoReleaseArgs) -> Result<ReleaseDetails
     let repo = normalize_repo(&args.repo)?;
     let client = build_http_client()?;
     let release = match args.tags {
-        Some(tags) if !tags.is_empty() => fetch_github_release_by_tags(&client, &repo, &tags).await?,
+        Some(tags) if !tags.is_empty() => {
+            fetch_github_release_by_tags(&client, &repo, &tags).await?
+        }
         _ => fetch_github_latest_release(&client, &repo).await?,
     };
     let value = release_display_value(&repo, &release)?;
@@ -384,18 +386,25 @@ pub fn launch_game(args: LaunchGameArgs) -> Result<(), String> {
     ensure_supported_platform()?;
     let executable_path = resolve_executable_path(&args);
     ensure_executable_exists(&executable_path)?;
+    let working_dir = resolve_working_dir(&args.game_dir, &executable_path)?;
     let inject_library_path =
         validate_injection_library_path(args.inject_library_path.as_deref())?.map(str::to_owned);
 
     launch_game_for_platform(
         &executable_path,
-        &args.game_dir,
+        &working_dir,
         inject_library_path.as_deref(),
     )
 }
 
 fn resolve_executable_path(args: &LaunchGameArgs) -> PathBuf {
-    let exe = PathBuf::from(&args.game_dir).join(&args.executable_name);
+    let executable_name = args.executable_name.trim();
+    let executable_path = PathBuf::from(executable_name);
+    if executable_path.is_absolute() {
+        return executable_path;
+    }
+
+    let exe = PathBuf::from(args.game_dir.trim()).join(executable_name);
     #[cfg(target_os = "windows")]
     {
         if exe.exists() {
@@ -414,6 +423,18 @@ fn resolve_executable_path(args: &LaunchGameArgs) -> PathBuf {
     {
         exe
     }
+}
+
+fn resolve_working_dir(game_dir: &str, executable_path: &Path) -> Result<PathBuf, String> {
+    let game_dir = game_dir.trim();
+    if !game_dir.is_empty() {
+        return Ok(PathBuf::from(game_dir));
+    }
+
+    executable_path
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "game path is missing".to_string())
 }
 
 fn build_http_client() -> Result<reqwest::Client, String> {
@@ -765,7 +786,7 @@ fn ensure_supported_platform() -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn launch_game_for_platform(
     executable_path: &Path,
-    game_dir: &str,
+    game_dir: &Path,
     inject_library_path: Option<&str>,
 ) -> Result<(), String> {
     if let Some(inject_library_path) = inject_library_path {
@@ -778,7 +799,7 @@ fn launch_game_for_platform(
 #[cfg(target_os = "linux")]
 fn launch_game_for_platform(
     executable_path: &Path,
-    game_dir: &str,
+    game_dir: &Path,
     inject_library_path: Option<&str>,
 ) -> Result<(), String> {
     launch_game_process(executable_path, game_dir, inject_library_path)
@@ -787,7 +808,7 @@ fn launch_game_for_platform(
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn launch_game_for_platform(
     executable_path: &Path,
-    game_dir: &str,
+    game_dir: &Path,
     _inject_library_path: Option<&str>,
 ) -> Result<(), String> {
     launch_game_process(executable_path, game_dir, None)
@@ -795,7 +816,7 @@ fn launch_game_for_platform(
 
 fn launch_game_process(
     executable_path: &Path,
-    game_dir: &str,
+    game_dir: &Path,
     preload_library_path: Option<&str>,
 ) -> Result<(), String> {
     let mut game_process = Command::new(executable_path);
@@ -814,7 +835,7 @@ fn launch_game_process(
 }
 
 #[cfg(target_os = "windows")]
-fn launch_game_windows(exe: &Path, game_dir: &str, lib: &str) -> Result<(), String> {
+fn launch_game_windows(exe: &Path, game_dir: &Path, lib: &str) -> Result<(), String> {
     use std::{
         mem::zeroed,
         ptr::{null, null_mut},
@@ -828,7 +849,7 @@ fn launch_game_windows(exe: &Path, game_dir: &str, lib: &str) -> Result<(), Stri
     };
 
     let exe_w = to_wide(exe.as_os_str().to_string_lossy().as_ref());
-    let dir_w = to_wide(game_dir);
+    let dir_w = to_wide(game_dir.as_os_str().to_string_lossy().as_ref());
     let mut si: STARTUPINFOW = unsafe { zeroed() };
     si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
     let mut pi: PROCESS_INFORMATION = unsafe { zeroed() };
@@ -926,6 +947,30 @@ mod tests {
         assert_eq!(platform_library_name(), "libsrcustom.so");
     }
 
+    #[test]
+    fn absolute_executable_path_is_used_directly() {
+        let executable_path = absolute_test_path("custom-subrosa", "subrosa.x64");
+        let args = LaunchGameArgs {
+            game_dir: "/steam/Sub Rosa".into(),
+            executable_name: executable_path.to_string_lossy().into_owned(),
+            inject_library_path: None,
+        };
+
+        assert_eq!(resolve_executable_path(&args), executable_path);
+    }
+
+    #[test]
+    fn empty_game_dir_uses_absolute_executable_parent_as_working_dir() {
+        let executable_path = absolute_test_path("custom-subrosa", "subrosa.x64");
+
+        assert_eq!(
+            resolve_working_dir("", &executable_path).expect("parent should be usable"),
+            executable_path
+                .parent()
+                .expect("test path should have parent")
+        );
+    }
+
     #[tokio::test]
     async fn download_file_writes_expected_content() {
         let server = MockServer::start().await;
@@ -956,5 +1001,16 @@ mod tests {
         assert!(!caps.contains("opener:default"));
         assert!(!caps.contains("process:default"));
         assert!(!caps.contains("updater:default"));
+    }
+
+    fn absolute_test_path(dir: &str, file_name: &str) -> PathBuf {
+        #[cfg(target_os = "windows")]
+        {
+            PathBuf::from(format!(r"C:\{dir}\{file_name}"))
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            PathBuf::from(format!("/{dir}/{file_name}"))
+        }
     }
 }

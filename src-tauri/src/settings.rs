@@ -10,6 +10,8 @@ pub struct LauncherSettings {
     #[serde(default = "default_executable_name_string")]
     pub executable_name: String,
     #[serde(default)]
+    pub custom_game_dir: Option<String>,
+    #[serde(default)]
     pub close_on_launch: bool,
 }
 
@@ -17,6 +19,7 @@ impl Default for LauncherSettings {
     fn default() -> Self {
         Self {
             executable_name: default_executable_name().to_string(),
+            custom_game_dir: None,
             close_on_launch: false,
         }
     }
@@ -25,7 +28,7 @@ impl Default for LauncherSettings {
 pub fn default_executable_name() -> &'static str {
     #[cfg(target_os = "windows")]
     {
-        "subrosa.x64.exe"
+        "subrosa.x64"
     }
     #[cfg(not(target_os = "windows"))]
     {

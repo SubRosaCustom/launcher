@@ -12,6 +12,7 @@ pub(crate) fn launcher_updater_pubkey() -> Option<&'static str> {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if let Some(pubkey) = launcher_updater_pubkey() {
                 #[cfg(desktop)]

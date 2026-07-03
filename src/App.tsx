@@ -39,7 +39,7 @@ const GH_REPO = 'SubRosaCustom/client_releases';
 const LAUNCHER_REPO = 'SubRosaCustom/launcher';
 const isWin = navigator.userAgent.includes('Windows');
 const isLinux = navigator.userAgent.includes('Linux');
-const defaultExecutableName = isWin ? 'subrosa.x64.exe' : 'subrosa.x64';
+const defaultExecutableName = 'subrosa.x64';
 
 const phaseLabels: Record<Phase, string> = {
   idle: 'Launch',
@@ -136,11 +136,28 @@ function formatPublishedAt(value: string | null) {
   }).format(date);
 }
 
+function isAbsolutePath(path: string) {
+  const value = path.trim();
+  return value.startsWith('/') || value.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(value);
+}
+
+function applyDetectedExecutable(settings: LauncherSettings, detection: DetectionResult) {
+  if (settings.executableName !== defaultExecutableName || detection.executableCandidates.length === 0) {
+    return settings;
+  }
+
+  return {
+    ...settings,
+    executableName: detection.executableCandidates[0],
+  };
+}
+
 function App() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [settings, setSettings] = useState<LauncherSettings>({
     executableName: defaultExecutableName,
+    customGameDir: null,
     closeOnLaunch: false,
   });
   const [detection, setDetection] = useState<DetectionResult | null>(null);
@@ -237,7 +254,7 @@ function App() {
         ]);
         if (cancelled) return;
 
-        setSettings(loadedSettings);
+        setSettings(applyDetectedExecutable(loadedSettings, detectedGame));
         setDetection(detectedGame);
         setClientReleaseHistory(clientHistory);
         setLauncherReleaseHistory(launcherHistory);
@@ -289,8 +306,8 @@ function App() {
 
   const handleLaunch = async () => {
     if (phase !== 'idle') return;
-    const gameDir = detection?.gameDir;
-    if (!gameDir) {
+    const gameDir = settings.customGameDir?.trim() || detection?.gameDir || '';
+    if (!gameDir && !isAbsolutePath(settings.executableName)) {
       appendLog('Cannot launch: game path is missing.');
       return;
     }
@@ -348,7 +365,7 @@ function App() {
     try {
       await saveSettings(nextSettings);
       setSettings(nextSettings);
-      appendLog(`Saved executable override: ${nextSettings.executableName}`);
+      appendLog(`Saved launch overrides: ${nextSettings.customGameDir || 'auto'} / ${nextSettings.executableName}`);
       setIsSettingsOpen(false);
     } catch (e) {
       appendLog(`Save failed: ${String(e)}`);
@@ -538,6 +555,7 @@ function App() {
         saving={isSavingSettings}
         activeSupportAction={activeSupportAction}
         settings={settings}
+        detectedGameDir={detection?.gameDir ?? null}
         executableCandidates={detection?.executableCandidates ?? []}
         onSave={handleSettingsSave}
         onClose={() => setIsSettingsOpen(false)}

@@ -2,6 +2,7 @@ export type Phase = 'idle' | 'downloading' | 'launching' | 'running';
 
 export interface LauncherSettings {
   executableName: string;
+  customGameDir: string | null;
   closeOnLaunch: boolean;
 }
 
