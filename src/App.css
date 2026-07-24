@@ -230,6 +230,90 @@ button {
   padding: 16px;
 }
 
+.risk-notice-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.94);
+}
+
+.risk-notice {
+  width: 100%;
+  max-width: 376px;
+  max-height: calc(100vh - 24px);
+  border: 4px solid var(--border);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  overflow: hidden;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+}
+
+.risk-notice-eyebrow {
+  color: #c86a6a;
+  font-size: 0.64rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.risk-notice-copy {
+  color: var(--muted);
+  font-size: 0.63rem;
+  font-weight: 100;
+  line-height: 1.3;
+}
+
+.risk-notice-copy > * + * {
+  margin-top: 6px;
+}
+
+.risk-notice-copy h1 {
+  color: var(--text);
+  font-size: 0.9rem;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.risk-notice-check {
+  min-height: 32px;
+  border: 2px solid var(--border-muted);
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
+.risk-notice-check input {
+  flex: 0 0 auto;
+  accent-color: var(--text);
+}
+
+.risk-notice-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.risk-notice-actions .action-btn {
+  width: auto;
+  height: 38px;
+  flex: 1 1 0;
+  border-width: 2px;
+}
+
+.risk-notice-actions .btn-label {
+  font-size: 0.72rem;
+}
+
 .update-modal {
   width: min(640px, calc(100vw - 32px));
   border: 4px solid var(--border);
@@ -519,8 +603,28 @@ button {
   flex-direction: column;
   gap: 14px;
   flex: 1 1 auto;
-  overflow: hidden;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scroll-behavior: auto;
+  scrollbar-color: #333 #666;
+  scrollbar-width: auto;
   padding: 18px 20px 18px;
+}
+
+.settings-body::-webkit-scrollbar {
+  width: 12px;
+  background: #666;
+}
+
+.settings-body::-webkit-scrollbar-track {
+  background: #666;
+}
+
+.settings-body::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 0;
+  background: #333;
 }
 
 .settings-actions {

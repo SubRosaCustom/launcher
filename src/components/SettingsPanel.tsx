@@ -19,6 +19,7 @@ interface SettingsPanelProps {
   onOpenCacheFolder: () => void;
   onForceRedownload: () => void;
   onClearCache: () => void;
+  onClearSyncedAssets: () => void;
   onCopyLauncherDiagnostics: () => void;
   onCopyClientDiagnostics: () => void;
 }
@@ -46,6 +47,7 @@ function SettingsPanel({
   onOpenCacheFolder,
   onForceRedownload,
   onClearCache,
+  onClearSyncedAssets,
   onCopyLauncherDiagnostics,
   onCopyClientDiagnostics,
 }: SettingsPanelProps) {
@@ -275,6 +277,18 @@ function SettingsPanel({
                         {activeSupportAction === 'openClientConfigFolder'
                           ? 'Working...'
                           : 'Open config folder'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      className="action-btn support-btn"
+                      onClick={onClearSyncedAssets}
+                      disabled={activeSupportAction !== null}
+                    >
+                      <span className="btn-label">
+                        {activeSupportAction === 'clearSyncedAssets'
+                          ? 'Working...'
+                          : 'Clear synced assets'}
                       </span>
                     </button>
                     <button

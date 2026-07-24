@@ -33,6 +33,7 @@ pub fn run() {
             commands::open_cache_folder,
             commands::force_redownload,
             commands::clear_cache,
+            commands::clear_synced_assets,
             commands::collect_launcher_diagnostics,
             commands::collect_client_diagnostics,
             commands::copy_text_to_clipboard,

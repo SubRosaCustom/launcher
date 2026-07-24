@@ -48,6 +48,10 @@ export function clearCache() {
   return invoke<string>('clear_cache');
 }
 
+export function clearSyncedAssets() {
+  return invoke<string>('clear_synced_assets');
+}
+
 export function collectLauncherDiagnostics(repo?: string) {
   return invoke<string>('collect_launcher_diagnostics', { args: { repo } });
 }

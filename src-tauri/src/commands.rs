@@ -170,6 +170,11 @@ pub fn clear_cache(app: AppHandle) -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn clear_synced_assets() -> Result<String, String> {
+    support::clear_synced_assets()
+}
+
+#[tauri::command]
 pub fn collect_launcher_diagnostics(
     app: AppHandle,
     args: RepoDiagnosticsArgs,

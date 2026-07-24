@@ -4,11 +4,13 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import logoImage from './assets/logo.png';
+import riskNotice from '../legal/RISK-NOTICE.md?raw';
 import './App.css';
 import SettingsPanel from './components/SettingsPanel';
 import {
   appendLauncherLog,
   clearCache,
+  clearSyncedAssets,
   collectClientDiagnostics,
   collectLauncherDiagnostics,
   copyTextToClipboard,
@@ -56,6 +58,7 @@ const CLIENT_DOWNLOAD_PROGRESS_EVENT = 'client-download-progress';
 const LAUNCHER_UPDATE_PROGRESS_EVENT = 'launcher-update-progress';
 const PROGRESS_BAR_WIDTH = 20;
 const CHANGELOG_PAGE_SIZE = 8;
+const RISK_NOTICE_STORAGE_KEY = 'src-risk-notice-accepted';
 
 interface LogEntry {
   id: number;
@@ -155,6 +158,10 @@ function applyDetectedExecutable(settings: LauncherSettings, detection: Detectio
 function App() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [hasAcceptedRiskNotice, setHasAcceptedRiskNotice] = useState(
+    () => localStorage.getItem(RISK_NOTICE_STORAGE_KEY) === 'true',
+  );
+  const [riskNoticeChecked, setRiskNoticeChecked] = useState(false);
   const [settings, setSettings] = useState<LauncherSettings>({
     executableName: defaultExecutableName,
     customGameDir: null,
@@ -305,7 +312,7 @@ function App() {
   }, [phase]);
 
   const handleLaunch = async () => {
-    if (phase !== 'idle') return;
+    if (phase !== 'idle' || !hasAcceptedRiskNotice) return;
     const gameDir = settings.customGameDir?.trim() || detection?.gameDir || '';
     if (!gameDir && !isAbsolutePath(settings.executableName)) {
       appendLog('Cannot launch: game path is missing.');
@@ -382,6 +389,11 @@ function App() {
     }
   };
 
+  const handleAcceptRiskNotice = () => {
+    localStorage.setItem(RISK_NOTICE_STORAGE_KEY, 'true');
+    setHasAcceptedRiskNotice(true);
+  };
+
   const handleOpenLauncherLogs = () =>
     void runSupportAction('openLauncherLogs', async () => {
       const path = await openLauncherLogs();
@@ -416,6 +428,12 @@ function App() {
     void runSupportAction('clearCache', async () => {
       const path = await clearCache();
       appendLog(`Cleared launcher cache: ${path}`);
+    });
+
+  const handleClearSyncedAssets = () =>
+    void runSupportAction('clearSyncedAssets', async () => {
+      const path = await clearSyncedAssets();
+      appendLog(`Cleared client synced assets: ${path}`);
     });
 
   const handleCopyLauncherDiagnostics = () =>
@@ -525,7 +543,7 @@ function App() {
         <button
           className={`action-btn ${phase !== 'idle' ? 'is-processing' : ''}`}
           onClick={handleLaunch}
-          disabled={phase !== 'idle' || isInstallingLauncherUpdate}
+          disabled={phase !== 'idle' || isInstallingLauncherUpdate || !hasAcceptedRiskNotice}
         >
           <span className="btn-label">
             {isInstallingLauncherUpdate ? 'Updating Launcher' : phaseLabels[phase]}
@@ -565,6 +583,7 @@ function App() {
         onOpenCacheFolder={handleOpenCacheFolder}
         onForceRedownload={handleForceRedownload}
         onClearCache={handleClearCache}
+        onClearSyncedAssets={handleClearSyncedAssets}
         onCopyLauncherDiagnostics={handleCopyLauncherDiagnostics}
         onCopyClientDiagnostics={handleCopyClientDiagnostics}
       />
@@ -678,6 +697,44 @@ function App() {
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {!hasAcceptedRiskNotice ? (
+        <div className="risk-notice-backdrop">
+          <section
+            aria-label="SRC risk acknowledgment and disclaimer"
+            aria-modal="true"
+            className="risk-notice"
+            role="dialog"
+          >
+            <p className="risk-notice-eyebrow">Before you continue</p>
+            <div className="risk-notice-copy">
+              <ReactMarkdown>{riskNotice}</ReactMarkdown>
+            </div>
+            <label className="risk-notice-check">
+              <input
+                autoFocus
+                checked={riskNoticeChecked}
+                onChange={(event) => setRiskNoticeChecked(event.target.checked)}
+                type="checkbox"
+              />
+              <span>I have read and accept this risk notice.</span>
+            </label>
+            <div className="risk-notice-actions">
+              <button className="action-btn" onClick={() => void getCurrentWindow().close()} type="button">
+                <span className="btn-label">Exit</span>
+              </button>
+              <button
+                className="action-btn"
+                disabled={!riskNoticeChecked}
+                onClick={handleAcceptRiskNotice}
+                type="button"
+              >
+                <span className="btn-label">Accept and continue</span>
+              </button>
+            </div>
+          </section>
         </div>
       ) : null}
     </main>

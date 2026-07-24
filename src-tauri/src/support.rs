@@ -66,6 +66,12 @@ pub fn clear_cache(app: &AppHandle) -> Result<String, String> {
     Ok(cache_root.to_string_lossy().into_owned())
 }
 
+pub fn clear_synced_assets() -> Result<String, String> {
+    let sync_cache_root = client_config_dir()?.join(CLIENT_SYNC_CACHE_ROOT_NAME);
+    remove_dir_if_exists(&sync_cache_root)?;
+    Ok(sync_cache_root.to_string_lossy().into_owned())
+}
+
 pub fn append_launcher_log(app: &AppHandle, message: &str) -> Result<(), String> {
     let trimmed = message.trim();
     if trimmed.is_empty() {
