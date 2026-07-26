@@ -1004,6 +1004,9 @@ mod tests {
     fn capability_scope_is_least_privilege() {
         let caps = include_str!("../capabilities/default.json");
         assert!(!caps.contains("opener:default"));
+        assert!(caps.contains(
+            "https://github.com/SubRosaCustom/launcher/blob/master/legal/RISK-NOTICE.md"
+        ));
         assert!(!caps.contains("process:default"));
         assert!(!caps.contains("updater:default"));
     }

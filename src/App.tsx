@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import logoImage from './assets/logo.png';
-import riskNotice from '../legal/RISK-NOTICE.md?raw';
 import './App.css';
 import SettingsPanel from './components/SettingsPanel';
 import {
@@ -59,6 +59,7 @@ const LAUNCHER_UPDATE_PROGRESS_EVENT = 'launcher-update-progress';
 const PROGRESS_BAR_WIDTH = 20;
 const CHANGELOG_PAGE_SIZE = 8;
 const RISK_NOTICE_STORAGE_KEY = 'src-risk-notice-accepted';
+const RISK_NOTICE_URL = 'https://github.com/SubRosaCustom/launcher/blob/master/legal/RISK-NOTICE.md';
 
 interface LogEntry {
   id: number;
@@ -708,10 +709,17 @@ function App() {
             className="risk-notice"
             role="dialog"
           >
-            <p className="risk-notice-eyebrow">Before you continue</p>
-            <div className="risk-notice-copy">
-              <ReactMarkdown>{riskNotice}</ReactMarkdown>
-            </div>
+            <h1>Use at your own risk</h1>
+            <a
+              className="risk-notice-link"
+              href={RISK_NOTICE_URL}
+              onClick={(event) => {
+                event.preventDefault();
+                void openUrl(RISK_NOTICE_URL);
+              }}
+            >
+              Read the risk notice ↗
+            </a>
             <label className="risk-notice-check">
               <input
                 autoFocus
@@ -719,7 +727,7 @@ function App() {
                 onChange={(event) => setRiskNoticeChecked(event.target.checked)}
                 type="checkbox"
               />
-              <span>I have read and accept this risk notice.</span>
+              <span>I understand</span>
             </label>
             <div className="risk-notice-actions">
               <button className="action-btn" onClick={() => void getCurrentWindow().close()} type="button">
@@ -731,7 +739,7 @@ function App() {
                 onClick={handleAcceptRiskNotice}
                 type="button"
               >
-                <span className="btn-label">Accept and continue</span>
+                <span className="btn-label">Continue</span>
               </button>
             </div>
           </section>
