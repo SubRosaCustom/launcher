@@ -2,7 +2,7 @@
 
 Sub Rosa: Custom (SRC) is an unofficial, experimental game modification. It loads native code into Sub Rosa and changes how the running game operates.
 
-Using SRC may cause crashes, incompatibility, damaged local configuration or synced files, antivirus warnings, loss of game or server access, and other unexpected behavior. SRC-enabled servers may also provide scripts, models, textures, sounds, and other content selected by independent server operators.
+Using SRC may cause crashes, incompatibility, damaged local configuration or synced files, antivirus warnings, and other unexpected behavior. SRC-enabled servers may also provide scripts, models, textures, sounds, and other content selected by independent server operators.
 
 ---
 
