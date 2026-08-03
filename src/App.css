@@ -284,8 +284,30 @@ button {
 }
 
 .risk-notice-check input {
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
-  accent-color: var(--text);
+  appearance: none;
+  border: 2px solid #808080;
+  background: var(--bg);
+  cursor: pointer;
+}
+
+.risk-notice-check input:hover:not(:checked) {
+  background: #404040;
+}
+
+.risk-notice-check input:checked {
+  background: #dfdfdf;
+}
+
+.risk-notice-check input:checked:hover {
+  background: var(--text);
+}
+
+.risk-notice-check input:focus-visible {
+  outline: 1px solid var(--text);
+  outline-offset: 2px;
 }
 
 .risk-notice-actions {
