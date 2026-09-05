@@ -13,7 +13,6 @@ export interface LibraryDownloadRequest {
 export interface DetectionResult {
   steamDir: string | null;
   gameDir: string | null;
-  executableCandidates: string[];
 }
 
 export interface ReleaseVersion {

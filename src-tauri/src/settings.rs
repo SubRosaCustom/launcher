@@ -26,12 +26,9 @@ impl Default for LauncherSettings {
 }
 
 pub fn default_executable_name() -> &'static str {
-    #[cfg(target_os = "windows")]
-    {
-        "subrosa.x64"
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
+    if cfg!(target_os = "windows") {
+        "subrosa.exe"
+    } else {
         "subrosa.x64"
     }
 }
@@ -55,7 +52,12 @@ pub fn load_settings(app: &AppHandle) -> Result<LauncherSettings, String> {
     }
     let settings_json =
         fs::read_to_string(&path).map_err(|e| format!("cannot read settings: {e}"))?;
-    serde_json::from_str(&settings_json).map_err(|e| format!("invalid settings: {e}"))
+    let mut settings: LauncherSettings =
+        serde_json::from_str(&settings_json).map_err(|e| format!("invalid settings: {e}"))?;
+    if matches!(settings.executable_name.as_str(), "subrosa.exe" | "subrosa.x64") {
+        settings.executable_name = default_executable_name().to_string();
+    }
+    Ok(settings)
 }
 
 pub fn save_settings(app: &AppHandle, settings: &LauncherSettings) -> Result<(), String> {

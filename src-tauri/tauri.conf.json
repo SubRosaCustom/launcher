@@ -27,13 +27,24 @@
     "active": true,
     "createUpdaterArtifacts": true,
     "targets": "all",
+    "category": "Game",
+    "shortDescription": "Launcher for Sub Rosa Custom",
+    "longDescription": "Installs and updates Sub Rosa Custom, then starts Sub Rosa with the SRC client loaded.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/srclauncher.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "linux/srclauncher.desktop"
+      }
+    }
   },
   "plugins": {
     "updater": {

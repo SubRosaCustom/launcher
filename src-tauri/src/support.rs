@@ -118,10 +118,6 @@ pub fn collect_launcher_diagnostics(app: &AppHandle, repo: Option<&str>) -> Resu
         format!("platform.arch={}", std::env::consts::ARCH),
         format!("steam.dir={}", option_line(&detection.steam_dir)),
         format!("game.dir={}", option_line(&detection.game_dir)),
-        format!(
-            "game.executables={}",
-            detection.executable_candidates.join(", ")
-        ),
         settings_summary,
         format!("log.file={}", log_path.to_string_lossy()),
         format!("cache.root={}", cache_root.to_string_lossy()),

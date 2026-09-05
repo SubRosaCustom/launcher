@@ -41,7 +41,7 @@ const GH_REPO = 'SubRosaCustom/client_releases';
 const LAUNCHER_REPO = 'SubRosaCustom/launcher';
 const isWin = navigator.userAgent.includes('Windows');
 const isLinux = navigator.userAgent.includes('Linux');
-const defaultExecutableName = 'subrosa.x64';
+const defaultExecutableName = isWin ? 'subrosa.exe' : 'subrosa.x64';
 
 const phaseLabels: Record<Phase, string> = {
   idle: 'Launch',
@@ -143,17 +143,6 @@ function formatPublishedAt(value: string | null) {
 function isAbsolutePath(path: string) {
   const value = path.trim();
   return value.startsWith('/') || value.startsWith('\\\\') || /^[A-Za-z]:[\\/]/.test(value);
-}
-
-function applyDetectedExecutable(settings: LauncherSettings, detection: DetectionResult) {
-  if (settings.executableName !== defaultExecutableName || detection.executableCandidates.length === 0) {
-    return settings;
-  }
-
-  return {
-    ...settings,
-    executableName: detection.executableCandidates[0],
-  };
 }
 
 function App() {
@@ -262,7 +251,7 @@ function App() {
         ]);
         if (cancelled) return;
 
-        setSettings(applyDetectedExecutable(loadedSettings, detectedGame));
+        setSettings(loadedSettings);
         setDetection(detectedGame);
         setClientReleaseHistory(clientHistory);
         setLauncherReleaseHistory(launcherHistory);
@@ -575,7 +564,6 @@ function App() {
         activeSupportAction={activeSupportAction}
         settings={settings}
         detectedGameDir={detection?.gameDir ?? null}
-        executableCandidates={detection?.executableCandidates ?? []}
         onSave={handleSettingsSave}
         onClose={() => setIsSettingsOpen(false)}
         onOpenLauncherLogs={handleOpenLauncherLogs}

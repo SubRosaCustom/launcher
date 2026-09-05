@@ -1,0 +1,12 @@
+[Desktop Entry]
+Categories={{categories}}
+Comment={{comment}}
+Exec={{exec}}
+GenericName=Sub Rosa Custom Launcher
+Icon={{icon}}
+Keywords=Sub Rosa;SRC;Launcher;Game;
+Name=SRCLauncher
+StartupNotify=true
+StartupWMClass=srclauncher
+Terminal=false
+Type=Application

@@ -10,7 +10,6 @@ interface SettingsPanelProps {
   activeSupportAction: string | null;
   settings: LauncherSettings;
   detectedGameDir: string | null;
-  executableCandidates: string[];
   onSave: (next: LauncherSettings) => Promise<void>;
   onClose: () => void;
   onOpenLauncherLogs: () => void;
@@ -38,7 +37,6 @@ function SettingsPanel({
   activeSupportAction,
   settings,
   detectedGameDir,
-  executableCandidates,
   onSave,
   onClose,
   onOpenLauncherLogs,
@@ -163,15 +161,12 @@ function SettingsPanel({
                   id="exeName"
                   value={executableName}
                   onChange={(e) => setExecutableName(e.currentTarget.value)}
-                  placeholder="subrosa.x64 or full executable path"
+                  placeholder="Executable name or full path"
                 />
                 <label htmlFor="exeName">Executable</label>
                 <button type="button" className="action-btn path-picker-btn" onClick={handleSelectExecutable}>
                   <span className="btn-label">Browse</span>
                 </button>
-              </div>
-              <div className="hint">
-                Suggested: {executableCandidates.length > 0 ? executableCandidates.join(', ') : 'none'}
               </div>
               <div className="settings-row">
                 <button
