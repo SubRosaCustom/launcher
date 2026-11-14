@@ -1,0 +1,65 @@
+app-id: com.src.launcher
+runtime: org.gnome.Platform
+runtime-version: '49'
+sdk: org.gnome.Sdk
+command: srclauncher
+
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --device=dri
+  # the steam library and the sub rosa install can be anywhere in $HOME or on a
+  # mounted drive, and the launcher has to read the game files to sync assets
+  - --filesystem=home
+  - --filesystem=/run/media
+  - --filesystem=/media
+  - --filesystem=/mnt
+  # the game runs on the host via flatpak-spawn, see launch_game_flatpak_host
+  - --talk-name=org.freedesktop.Flatpak
+  # webkitgtk's dmabuf renderer breaks on some mesa/nvidia setups inside the
+  # sandbox; without this the window comes up blank or the app aborts on start
+  - --env=WEBKIT_DISABLE_DMABUF_RENDERER=1
+
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.node22
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/node22/bin
+  # npm and cargo fetch during the build. flathub strips build-args with
+  # --sandbox, so a flathub submission needs vendored sources instead
+  build-args:
+    - --share=network
+  env:
+    HOME: /run/build/srclauncher
+    CARGO_HOME: /run/build/srclauncher/cargo
+    npm_config_cache: /run/build/srclauncher/npm-cache
+
+modules:
+  - name: srclauncher
+    buildsystem: simple
+    build-commands:
+      # flatpak updates come from the repository, so the bundled tauri
+      # self-updater must not be part of the build
+      - sed -i '/"createUpdaterArtifacts"/s/true/false/' src-tauri/tauri.conf.json
+      - npm ci --no-audit --no-fund
+      - npm run tauri build -- --no-bundle
+      - install -Dm755 src-tauri/target/release/srclauncher /app/bin/srclauncher
+      - install -Dm644 com.src.launcher.desktop /app/share/applications/com.src.launcher.desktop
+      - install -Dm644 com.src.launcher.metainfo.xml /app/share/metainfo/com.src.launcher.metainfo.xml
+      - install -Dm644 src-tauri/icons/32x32.png /app/share/icons/hicolor/32x32/apps/com.src.launcher.png
+      - install -Dm644 src-tauri/icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.src.launcher.png
+      - install -Dm644 'src-tauri/icons/128x128@2x.png' /app/share/icons/hicolor/256x256/apps/com.src.launcher.png
+    sources:
+      # bump tag and commit together on every release
+      - type: git
+        url: https://github.com/SubRosaCustom/launcher.git
+        tag: launcher-v1.0.0
+        commit: f54c78d6792428f64fe69008048343a94f8decb7
+      - type: file
+        path: com.src.launcher.desktop
+      - type: file
+        path: com.src.launcher.metainfo.xml

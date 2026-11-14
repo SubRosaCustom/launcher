@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.src.launcher</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+
+  <name>SRCLauncher</name>
+  <summary>Launcher for Sub Rosa Custom</summary>
+
+  <description>
+    <p>
+      SRCLauncher installs and updates the Sub Rosa Custom client, syncs the assets the
+      client expects, and then starts Sub Rosa with the client loaded.
+    </p>
+    <p>
+      Client and asset updates are fetched from the SubRosaCustom release repositories. A
+      local copy of Sub Rosa is required; the launcher does not ship the game.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">com.src.launcher.desktop</launchable>
+
+  <url type="homepage">https://github.com/SubRosaCustom/launcher</url>
+  <url type="bugtracker">https://github.com/SubRosaCustom/launcher/issues</url>
+
+  <categories>
+    <category>Game</category>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>Sub Rosa</keyword>
+    <keyword>launcher</keyword>
+    <keyword>mod</keyword>
+  </keywords>
+
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-cartoon">moderate</content_attribute>
+    <content_attribute id="social-chat">intense</content_attribute>
+  </content_rating>
+
+  <releases>
+    <release version="1.0.0" date="2026-11-14"/>
+  </releases>
+</component>

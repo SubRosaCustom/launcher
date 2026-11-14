@@ -1,0 +1,122 @@
+name: aur
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to publish, without the launcher-v tag prefix (for example 1.0.0)
+        required: true
+      pkgrel:
+        description: pkgrel to use
+        required: true
+        default: "1"
+
+concurrency:
+  group: aur-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    # prereleases never go to the AUR
+    if: github.event_name == 'workflow_dispatch' || github.event.release.prerelease == false
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      AUR_PKGNAME: srclauncher
+      AUR_GIT_URL: ssh://aur@aur.archlinux.org/srclauncher.git
+    steps:
+      - name: Install tooling
+        run: |
+          # nodejs is needed by the js based actions running inside this container
+          pacman -Syu --needed --noconfirm git openssh curl sed nodejs
+
+      - name: Checkout packaging source
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            pkgver="${{ inputs.version }}"
+            pkgrel="${{ inputs.pkgrel }}"
+          else
+            tag="${{ github.event.release.tag_name }}"
+            pkgver="${tag#launcher-v}"
+            pkgrel="1"
+          fi
+          case "$pkgver" in
+            ''|*[!0-9.]*)
+              echo "unexpected version: $pkgver" >&2
+              exit 1
+              ;;
+          esac
+          echo "pkgver=$pkgver" >> "$GITHUB_OUTPUT"
+          echo "pkgrel=$pkgrel" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AUR ssh access
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          install -dm700 /root/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /root/.ssh/aur
+          chmod 600 /root/.ssh/aur
+          ssh-keyscan -t rsa,ecdsa,ed25519 aur.archlinux.org > /root/.ssh/known_hosts
+          cat > /root/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            IdentityFile /root/.ssh/aur
+            IdentitiesOnly yes
+            User aur
+          EOF
+
+      - name: Clone AUR repository
+        run: |
+          git clone "$AUR_GIT_URL" aur-repo
+          git -C aur-repo config user.name "Nova"
+          git -C aur-repo config user.email "nova@orcachill.in"
+
+      - name: Update PKGBUILD
+        id: bump
+        run: |
+          pkgver="${{ steps.version.outputs.pkgver }}"
+          pkgrel="${{ steps.version.outputs.pkgrel }}"
+
+          # re-release of an existing version bumps pkgrel instead of resetting it
+          if [ -f aur-repo/PKGBUILD ]; then
+            old_ver="$(sed -n 's/^pkgver=//p' aur-repo/PKGBUILD)"
+            old_rel="$(sed -n 's/^pkgrel=//p' aur-repo/PKGBUILD)"
+            if [ "$old_ver" = "$pkgver" ] && [ "${{ github.event_name }}" = "release" ]; then
+              pkgrel=$((old_rel + 1))
+            fi
+          fi
+
+          checksum="$(curl -fsSL "https://github.com/SubRosaCustom/launcher/archive/refs/tags/launcher-v${pkgver}.tar.gz" | sha256sum | cut -d' ' -f1)"
+
+          cp packaging/aur/PKGBUILD aur-repo/PKGBUILD
+          sed -i \
+            -e "s/^pkgver=.*/pkgver=${pkgver}/" \
+            -e "s/^pkgrel=.*/pkgrel=${pkgrel}/" \
+            -e "s/^sha256sums=.*/sha256sums=('${checksum}')/" \
+            aur-repo/PKGBUILD
+
+          echo "version=${pkgver}-${pkgrel}" >> "$GITHUB_OUTPUT"
+
+      - name: Regenerate .SRCINFO
+        run: |
+          useradd -m builder
+          chown -R builder:builder aur-repo
+          su builder -c "cd aur-repo && makepkg --printsrcinfo" > aur-repo/.SRCINFO
+          chown -R root:root aur-repo
+          cat aur-repo/.SRCINFO
+
+      - name: Push to AUR
+        run: |
+          cd aur-repo
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "aur already at ${{ steps.bump.outputs.version }}"
+            exit 0
+          fi
+          git commit -m "upgpkg: $AUR_PKGNAME ${{ steps.bump.outputs.version }}"
+          git push origin master
