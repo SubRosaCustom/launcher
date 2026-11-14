@@ -17,6 +17,14 @@ const CLIENT_LOCAL_RUNTIME_ROOT_NAME: &str = "subrosacustom";
 const CLIENT_SYNC_CACHE_ROOT_NAME: &str = "sync";
 const CLIENT_TEXTURE_EXPORTS_DIR_NAME: &str = "texture_exports";
 
+/// Flatpak apps get their own runtime and a redirected XDG dirs, but the game
+/// itself has to run on the host, so a few paths and the launch path have to
+/// match what the host sees.
+#[cfg(target_os = "linux")]
+pub fn running_in_flatpak() -> bool {
+    Path::new("/.flatpak-info").exists()
+}
+
 pub fn repo_cache_dir(app: &AppHandle, repo: &str) -> Result<PathBuf, String> {
     let cache_dir = cache_root_dir(app)?.join(sanitize_path_part(repo));
     fs::create_dir_all(&cache_dir)
@@ -296,7 +304,15 @@ fn client_config_dir() -> Result<PathBuf, String> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
+        // inside flatpak XDG_CONFIG_HOME points into the sandbox, but the client
+        // runs on the host and reads its config from the real home, so both
+        // sides need to agree on the same directory
+        #[cfg(target_os = "linux")]
+        let xdg_overridden = running_in_flatpak();
+        #[cfg(not(target_os = "linux"))]
+        let xdg_overridden = false;
+
+        if let Some(path) = (!xdg_overridden).then(|| env::var_os("XDG_CONFIG_HOME")).flatten() {
             let config_home = PathBuf::from(path);
             if !config_home.is_absolute() {
                 return Err("path_error: XDG_CONFIG_HOME must be absolute".to_string());

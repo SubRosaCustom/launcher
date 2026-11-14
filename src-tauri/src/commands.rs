@@ -824,6 +824,11 @@ fn launch_game_process(
     game_dir: &Path,
     preload_library_path: Option<&str>,
 ) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    if support::running_in_flatpak() {
+        return launch_game_flatpak_host(executable_path, game_dir, preload_library_path);
+    }
+
     let mut game_process = Command::new(executable_path);
     game_process.current_dir(game_dir);
     #[cfg(not(target_os = "linux"))]
@@ -836,6 +841,32 @@ fn launch_game_process(
     game_process
         .spawn()
         .map_err(|e| format!("failed to launch game process: {e}"))?;
+    Ok(())
+}
+
+/// A flatpak sandbox has its own loader and glibc, so spawning the game from
+/// inside it fails. `flatpak-spawn --host` asks the portal to run the game on
+/// the host instead, which is also where the injected library path and the
+/// client config have to be valid.
+#[cfg(target_os = "linux")]
+fn launch_game_flatpak_host(
+    executable_path: &Path,
+    game_dir: &Path,
+    preload_library_path: Option<&str>,
+) -> Result<(), String> {
+    let mut game_process = Command::new("flatpak-spawn");
+    game_process
+        .arg("--host")
+        .arg(format!("--directory={}", game_dir.display()));
+
+    if let Some(preload_library_path) = preload_library_path {
+        game_process.arg(format!("--env=LD_PRELOAD={preload_library_path}"));
+    }
+
+    game_process.arg(executable_path);
+    game_process
+        .spawn()
+        .map_err(|e| format!("failed to launch game on host: {e}"))?;
     Ok(())
 }
 
