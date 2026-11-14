@@ -1,0 +1,64 @@
+# Maintainer: Nova <nova@orcachill.in>
+
+pkgname=srclauncher
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Launcher for Sub Rosa Custom that installs and updates the SRC client, then starts Sub Rosa with it loaded'
+arch=('x86_64')
+url='https://github.com/SubRosaCustom/launcher'
+license=('custom')
+# ring compiles C into the crate, and gcc LTO objects (makepkg's -flto=auto)
+# cannot be linked by the rustc/lld link stage: it drops them and every
+# ring_core_* symbol ends up undefined
+options=('!lto')
+depends=('gtk3' 'webkit2gtk-4.1' 'librsvg' 'hicolor-icon-theme')
+makedepends=('rust' 'cargo' 'nodejs' 'npm')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/SubRosaCustom/launcher/archive/refs/tags/launcher-v$pkgver.tar.gz")
+sha256sums=('a034c584a76c2a89a3826f11acdbfd6309677d55e2f652464e24282db3459683')
+
+# GitHub extracts the launcher-v<ver> tag into launcher-launcher-v<ver>
+_archive_dir="launcher-launcher-v$pkgver"
+
+prepare() {
+  cd "$_archive_dir"
+
+  # pacman owns the installed files, so the bundled Tauri self-updater must not
+  # ship: without an updater pubkey baked in the updater plugin stays disabled
+  # and the app never tries to overwrite /usr/bin/srclauncher
+  sed -i '/"createUpdaterArtifacts"/s/true/false/' src-tauri/tauri.conf.json
+  grep -q '"createUpdaterArtifacts": false' src-tauri/tauri.conf.json || {
+    error 'tauri.conf.json no longer contains createUpdaterArtifacts'
+    return 1
+  }
+
+  # fill in the placeholders of the Tauri desktop template
+  sed -e 's/{{categories}}/Game;/' \
+    -e 's/{{comment}}/Launcher for Sub Rosa Custom/' \
+    -e "s/{{exec}}/$pkgname/" \
+    -e "s/{{icon}}/$pkgname/" \
+    src-tauri/linux/srclauncher.desktop > "$srcdir/$pkgname.desktop"
+}
+
+build() {
+  cd "$_archive_dir"
+
+  export CARGO_HOME="$srcdir/cargo-home"
+  export npm_config_cache="$srcdir/npm-cache"
+
+  npm ci --no-audit --no-fund
+  # --no-bundle: no AppImage/deb/rpm, the binary embeds the frontend itself
+  npm run tauri build -- --no-bundle
+}
+
+package() {
+  cd "$_archive_dir"
+
+  install -Dm755 "src-tauri/target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+
+  install -Dm644 src-tauri/icons/32x32.png "$pkgdir/usr/share/icons/hicolor/32x32/apps/$pkgname.png"
+  install -Dm644 src-tauri/icons/128x128.png "$pkgdir/usr/share/icons/hicolor/128x128/apps/$pkgname.png"
+  install -Dm644 'src-tauri/icons/128x128@2x.png' "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
+
+  install -Dm644 "$srcdir/$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+  install -Dm644 legal/RISK-NOTICE.md "$pkgdir/usr/share/licenses/$pkgname/RISK-NOTICE.md"
+}
