@@ -1,4 +1,5 @@
 mod commands;
+mod discord;
 mod settings;
 mod steam;
 mod support;
@@ -19,6 +20,10 @@ pub fn run() {
                 #[cfg(desktop)]
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().pubkey(pubkey).build())?;
+            }
+
+            if let Err(error) = discord::register_launch_handler() {
+                eprintln!("Discord launch handler not registered: {error}");
             }
 
             Ok(())
@@ -44,7 +49,8 @@ pub fn run() {
             commands::get_release_details,
             commands::get_release_history,
             commands::download_injection_library,
-            commands::launch_game
+            commands::launch_game,
+            discord::discord_launch_requested
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

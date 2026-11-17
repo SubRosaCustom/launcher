@@ -15,6 +15,7 @@ import {
   collectLauncherDiagnostics,
   copyTextToClipboard,
   detectSubrosa,
+  discordLaunchRequested,
   downloadInjectionLibrary,
   forceRedownload,
   getReleaseHistory,
@@ -343,6 +344,24 @@ function App() {
       setPhase('idle');
     }
   };
+
+  // a Discord join starts the launcher; launch once settings and detection are loaded
+  const discordLaunchPending = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (discordLaunchPending.current === null) {
+      discordLaunchPending.current = false;
+      discordLaunchRequested()
+        .then((requested) => {
+          discordLaunchPending.current = requested;
+          if (requested) appendLog('Started from Discord; launching the game.');
+        })
+        .catch((error) => appendLog(`Discord launch check failed: ${String(error)}`));
+    }
+    if (discordLaunchPending.current && detection && phase === 'idle' && hasAcceptedRiskNotice) {
+      discordLaunchPending.current = false;
+      void handleLaunch();
+    }
+  });
 
   const runSupportAction = async (actionName: string, action: () => Promise<void>) => {
     if (activeSupportAction) return;

@@ -8,6 +8,10 @@ import type {
   ReleaseVersion,
 } from '../types/launcher';
 
+export function discordLaunchRequested() {
+  return invoke<boolean>('discord_launch_requested');
+}
+
 export function loadSettings() {
   return invoke<LauncherSettings>('load_settings');
 }
