@@ -63,6 +63,40 @@ pub(crate) fn game_running(_executable_name: &str) -> bool {
     false
 }
 
+/// Tells a running client to reconnect to Discord, which is what makes Discord deliver the pending join.
+#[cfg(target_os = "windows")]
+pub(crate) fn signal_running_game() {
+    use std::io::Write;
+
+    let result = std::fs::OpenOptions::new()
+        .write(true)
+        .open(r"\\.\pipe\subrosacustom")
+        .and_then(|mut pipe| pipe.write_all(b"j"));
+    if let Err(error) = result {
+        eprintln!("discord join signal: {error}");
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn signal_running_game() {
+    use std::os::linux::net::SocketAddrExt;
+    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::net::{SocketAddr, UnixDatagram};
+
+    let result = (|| -> std::io::Result<()> {
+        let uid = std::fs::metadata("/proc/self")?.uid();
+        let address = SocketAddr::from_abstract_name(format!("subrosacustom-{uid}"))?;
+        UnixDatagram::unbound()?.send_to_addr(b"j", &address)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        eprintln!("discord join signal: {error}");
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+pub(crate) fn signal_running_game() {}
+
 #[tauri::command]
 pub fn discord_launch_requested() -> bool {
     launch_requested()

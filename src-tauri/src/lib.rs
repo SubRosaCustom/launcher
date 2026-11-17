@@ -21,10 +21,10 @@ pub fn run() {
                 return;
             }
             let settings = settings::load_settings(app).unwrap_or_default();
-            if !discord::game_running(&settings.executable_name) {
-                if let Err(error) = app.emit("discord-launch", ()) {
-                    eprintln!("discord-launch event failed: {error}");
-                }
+            if discord::game_running(&settings.executable_name) {
+                discord::signal_running_game();
+            } else if let Err(error) = app.emit("discord-launch", ()) {
+                eprintln!("discord-launch event failed: {error}");
             }
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -39,6 +39,7 @@ pub fn run() {
             if discord::launch_requested() {
                 let settings = settings::load_settings(app.handle()).unwrap_or_default();
                 if discord::game_running(&settings.executable_name) {
+                    discord::signal_running_game();
                     app.handle().exit(0);
                     return Ok(());
                 }
