@@ -345,8 +345,21 @@ function App() {
     }
   };
 
+  // a Discord join while this launcher is open arrives as an event instead of a new process
+  useEffect(() => {
+    const unlisten = listen('discord-launch', () => {
+      discordLaunchPending.current = true;
+      setDiscordLaunchTick((tick) => tick + 1);
+      appendLog('Discord join received; launching the game.');
+    });
+    return () => {
+      void unlisten.then((stop) => stop());
+    };
+  }, []);
+
   // a Discord join starts the launcher; launch once settings and detection are loaded
   const discordLaunchPending = useRef<boolean | null>(null);
+  const [, setDiscordLaunchTick] = useState(0);
   useEffect(() => {
     if (discordLaunchPending.current === null) {
       discordLaunchPending.current = false;

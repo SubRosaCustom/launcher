@@ -9,8 +9,58 @@ fn scheme() -> String {
 }
 
 pub(crate) fn launch_requested() -> bool {
+    launch_requested_in(std::env::args())
+}
+
+pub(crate) fn launch_requested_in(args: impl IntoIterator<Item = String>) -> bool {
     let prefix = format!("{}:", scheme());
-    std::env::args().skip(1).any(|arg| arg.starts_with(&prefix))
+    args.into_iter().skip(1).any(|arg| arg.starts_with(&prefix))
+}
+
+// Discord starts the launcher even when the game is already running; the running client gets the join itself
+#[cfg(target_os = "windows")]
+pub(crate) fn game_running(executable_name: &str) -> bool {
+    use std::os::windows::process::CommandExt;
+    use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let name = std::path::Path::new(executable_name)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let output = Command::new("tasklist")
+        .args(["/FO", "CSV", "/NH", "/FI", &format!("IMAGENAME eq {name}")])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    match output {
+        Ok(out) => String::from_utf8_lossy(&out.stdout)
+            .to_lowercase()
+            .contains(&format!("\"{name}\"")),
+        Err(error) => {
+            eprintln!("tasklist failed: {error}");
+            false
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn game_running(executable_name: &str) -> bool {
+    // comm holds at most 15 bytes of the executable name
+    let name: String = std::path::Path::new(executable_name)
+        .file_name()
+        .map(|n| n.to_string_lossy().chars().take(15).collect())
+        .unwrap_or_default();
+    let Ok(entries) = std::fs::read_dir("/proc") else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        std::fs::read_to_string(entry.path().join("comm")).is_ok_and(|comm| comm.trim_end() == name)
+    })
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+pub(crate) fn game_running(_executable_name: &str) -> bool {
+    false
 }
 
 #[tauri::command]

@@ -1,3 +1,5 @@
+use tauri::Emitter;
+
 mod commands;
 mod discord;
 mod settings;
@@ -13,6 +15,18 @@ pub(crate) fn launcher_updater_pubkey() -> Option<&'static str> {
 
 pub fn run() {
     tauri::Builder::default()
+        // a Discord join must not open a second launcher; the running one launches the game itself
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !discord::launch_requested_in(args) {
+                return;
+            }
+            let settings = settings::load_settings(app).unwrap_or_default();
+            if !discord::game_running(&settings.executable_name) {
+                if let Err(error) = app.emit("discord-launch", ()) {
+                    eprintln!("discord-launch event failed: {error}");
+                }
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
@@ -20,6 +34,14 @@ pub fn run() {
                 #[cfg(desktop)]
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().pubkey(pubkey).build())?;
+            }
+
+            if discord::launch_requested() {
+                let settings = settings::load_settings(app.handle()).unwrap_or_default();
+                if discord::game_running(&settings.executable_name) {
+                    app.handle().exit(0);
+                    return Ok(());
+                }
             }
 
             if let Err(error) = discord::register_launch_handler() {
